@@ -2,6 +2,10 @@
 
 > 看视频的时候，把四级词汇悄悄攒起来。
 
+[![Version](https://img.shields.io/badge/version-1.2.0-c2572a)](manifest.json)
+[![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
+[![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
+
 一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级词汇范围内的英文单词**，去重、标注出现时间点、一键查看单词变形与释义，还能像背单词 App 一样把已经熟悉的词「斩」掉。
 
 <p align="center">
@@ -104,7 +108,7 @@ popup.js  渲染单词列表 / 详情 / 斩词 / 历史
 无需构建步骤 —— 源码即产物，改完在扩展管理页点「刷新」即可。
 
 ```bash
-git clone https://github.com/<your-name>/naiwa-cet4.git
+git clone https://github.com/JETGO-BLUE/naiwa-cet4.git
 cd naiwa-cet4
 # 然后在 chrome://extensions 里「加载已解压的扩展程序」指向本目录
 ```
