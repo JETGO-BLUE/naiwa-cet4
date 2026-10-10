@@ -1,12 +1,12 @@
 # 奶娃过四级 · Naiwa CET-4 Collector
 
-> 看视频的时候，把四级词汇悄悄攒起来。
+> 看视频的时候，把四级、六级和雅思学习词汇悄悄攒起来。
 
 [![Version](https://img.shields.io/badge/version-1.2.0-c2572a)](manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
 [![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
 
-一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级词汇范围内的英文单词**，去重、标注出现时间点、一键查看单词变形与释义，还能像背单词 App 一样把已经熟悉的词「斩」掉。
+一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级、六级和雅思学习词表中的英文单词**，每次选择一个词库查看，展示全部命中标签，去重、标注出现时间点、一键查看单词变形与释义，还能把已经熟悉的词「斩」掉。
 
 <p align="center">
   <img src="icons/icon128.png" width="110" alt="奶娃过四级">
@@ -19,12 +19,22 @@
 | 功能 | 说明 |
 |------|------|
 | **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文），未开启时自动回退到 YouTube 原生字幕 |
+| **单选词库** | 四级 / 六级 / 雅思每次选一项，记住上次选择；当前列表、历史词数和已斩词随选择筛选 |
+| **全部命中标签** | 重叠词显示全部类别，例如「六级」「雅思」；采集保存三份词库并集，切换无需重新抓取 |
 | **去重 + 时间点** | 同一个词只列一次，记录它在视频里出现的位置（`mm:ss`），最多显示前 10 个 |
-| **一键「斩」** | 标记为熟悉词后，该词不再出现在单词列表中，越用越清爽 |
+| **一键「斩」** | 标记为熟悉词后，词卡变灰并计入已斩；三个词库共享熟悉词记录 |
 | **点击查详情** | 点任意单词 → 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
 | **只读不打扰** | 纯只读监听页面字幕元素，不修改任何页面内容，不影响翻译扩展与视频播放 |
 | **跨站点** | 不局限于 YouTube，任何页面上出现字幕（配合沉浸式翻译）都能收集 |
+
+## 显示规则
+
+内置词表保留完整数据，但界面会自动隐藏常见基础词及其变形，例如冠词、代词、介词、连词以及 `be`、`go`、`have`、`do` 等基础词。原始采集记录仍保存在本地，调整过滤名单后可以恢复显示。
+
+默认选择四级。六级新增 **2,219 词**，雅思选项新增 **1,000 词**；雅思使用社区整理的 **TOEFL / IELTS 共用学术词表，非官方、非雅思专属**。标签表示命中内置词表。旧记录只能为已保存的四级词补标签，重新抓取可补充以前未收集的六级和雅思词。
+
+来源、释义差异与数据许可见 [词库说明](docs/词库说明.md)，扩展内也有「词表来源」入口。
 
 ---
 
@@ -58,6 +68,11 @@
 ├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
 ├── popup.html / popup.js  # 弹窗界面：单词列表、详情、斩词、历史
 ├── cet4_words.json        # 四级词表（约 4590 词）
+├── cet6_words.json        # 六级词表（2219 词，CC BY-SA 4.0）
+├── ielts_words.json       # TOEFL/IELTS 共用学术词表（1000 词，MIT）
+├── vocabulary-sources.*   # 来源版本、校验值、面向用户的署名页面
+├── licenses/              # 新增词表的原数据许可声明
+├── scripts/               # 固定源版本与哈希的词表重建脚本
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
@@ -85,10 +100,10 @@ content.js  提取英文字幕文本 → 发给 background
         ↓  chrome.runtime.sendMessage
 background.js
   ├─ lemmatize()  词形还原（不规则动词表 + 规则变形 + 词表查证）
-  ├─ matchCET4()  与 cet4_words.json 比对，命中即记录 surface / lemma / 时间点
+  ├─ matchVocabulary()  与三份词表并集比对，命中即记录 surface / lemma / 全部类别 / 时间点
   └─ chrome.storage.local  按 videoId 存储，最多保留前 10 个时间点
         ↓
-popup.js  渲染单词列表 / 详情 / 斩词 / 历史
+popup.js  按所选词库渲染单词列表 / 详情 / 斩词 / 历史
           点击单词 → LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
 ```
 
@@ -127,7 +142,7 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、`cet4_words.json`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
+也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、三份 `*_words.json`、`vocabulary-sources.json`、`vocabulary-sources.html`、`licenses/`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
 
 ---
 
@@ -139,7 +154,7 @@ git push origin v1.2.0
 
 ## 许可
 
-[MIT](LICENSE)
+项目代码使用 [MIT](LICENSE)。新增六级词表及其格式改编使用 **CC BY-SA 4.0**，雅思选项的共用学术词表使用 **MIT**；数据许可、原版权及署名见 [词表来源](vocabulary-sources.html) 和 `licenses/`。
 
 ---
 

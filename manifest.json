@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "奶娃过四级",
   "version": "1.2.0",
-  "description": "奶娃陪你过四级：收集视频字幕中的四级词汇（优先读取沉浸式翻译的双语字幕），去重、标注出现时间点、查词形变化，支持「斩」掉熟悉词",
+  "description": "从视频字幕收集四级、六级和雅思学习词汇，单选词库、显示全部命中标签、去重和标注时间点，支持查词形及「斩」掉熟悉词",
   "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "http://*/*",
@@ -20,7 +20,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["cet4_words.json"],
+      "resources": ["cet4_words.json", "cet6_words.json", "ielts_words.json"],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

@@ -1,25 +1,86 @@
-// background.js —— service worker：字幕分词/四级匹配/词形还原/联网查词/存储
+// background.js —— service worker：字幕分词/多词库匹配/词形还原/联网查词/存储
 
 'use strict';
 
-// ============ 1. 四级词表加载 ============
-let CET4 = null;
-async function loadCET4() {
-  if (CET4) return CET4;
-  try {
-    const url = chrome.runtime.getURL('cet4_words.json');
-    const resp = await fetch(url);
-    CET4 = await resp.json();
-    console.log('[YT-CET4] 四级词表加载完成，共', Object.keys(CET4).length, '词');
-    return CET4;
-  } catch (e) {
-    console.error('[YT-CET4] 词表加载失败', e);
-    CET4 = {};
-    return CET4;
+// ============ 1. 本地词表加载 ============
+const VOCABULARIES = ['cet4', 'cet6', 'ielts'];
+let WORD_INDEX = null;
+let vocabularyLoad = null;
+async function loadVocabularies() {
+  if (WORD_INDEX) return WORD_INDEX;
+  if (!vocabularyLoad) {
+    vocabularyLoad = (async () => {
+      const maps = await Promise.all(VOCABULARIES.map(async (category) => {
+        const response = await fetch(chrome.runtime.getURL(category + '_words.json'));
+        if (!response.ok) throw new Error(category + ' 词表加载失败，请重新加载扩展');
+        const map = await response.json();
+        if (!map || Array.isArray(map) || typeof map !== 'object' || !Object.keys(map).length ||
+            Object.values(map).some((meaning) => typeof meaning !== 'string')) {
+          throw new Error(category + ' 词表格式错误');
+        }
+        return map;
+      }));
+      const index = Object.create(null);
+      maps.forEach((map, i) => {
+        for (const [word, meaning] of Object.entries(map)) {
+          if (!index[word]) index[word] = { meaning: '', categories: [] };
+          index[word].categories.push(VOCABULARIES[i]);
+          if (!index[word].meaning && meaning) index[word].meaning = meaning;
+        }
+      });
+      WORD_INDEX = index;
+      return index;
+    })().catch((error) => {
+      vocabularyLoad = null; // 修复文件后允许重试，避免把失败当成空词表。
+      throw error;
+    });
   }
+  return vocabularyLoad;
 }
 
-// ============ 2. 词形还原（强化版） ============
+// ============ 2. 基础词过滤 ============
+// 词表保留完整内容；只在返回给界面时隐藏这些过于基础的词及其变形。
+const BASIC_WORDS = new Set(
+  `a an the i you he she it we they me him her us them
+my your his its our their mine yours hers ours theirs
+this that these those and or but so if as
+to of in on at for from with by
+be go have do get come take make say see know think
+can could may might must shall should will would
+not no yes very`.split(/\s+/)
+);
+
+function isBasicWord(word, lemma) {
+  return BASIC_WORDS.has(String(word || '').toLowerCase()) ||
+    BASIC_WORDS.has(String(lemma || '').toLowerCase());
+}
+
+async function filterRecordForDisplay(record) {
+  if (!record) return null;
+  const index = await loadVocabularies();
+  // 旧记录只补已有词的标签，不回写原始记录，也不假造未采集的词。
+  const words = (record.words || []).map((item) => {
+    const match = matchVocabulary(item.word, index);
+    return match ? { ...item, lemma: match.lemma, meaning: match.meaning || item.meaning || '', categories: match.categories } : item;
+  }).filter((item) => !isBasicWord(item.word, item.lemma));
+  return {
+    ...record,
+    words: words,
+    totalWords: words.length,
+    isLegacyVocabulary: !record.vocabularyVersion,
+  };
+}
+
+async function getFamiliarWordsForDisplay() {
+  const data = await chrome.storage.local.get('familiarWords');
+  const index = await loadVocabularies();
+  const entries = (data.familiarWords || []).map((word) => matchVocabulary(word, index))
+    .filter((match) => match && !isBasicWord(match.surface, match.lemma))
+    .map((match) => ({ word: match.surface, lemma: match.lemma, meaning: match.meaning, categories: match.categories }));
+  return { familiar: entries.map((item) => item.word), familiarEntries: entries };
+}
+
+// ============ 3. 词形还原（强化版） ============
 // 不规则动词完整表
 const IRREGULAR = {
   // be
@@ -63,115 +124,48 @@ const IRREGULAR = {
 // 规则还原（用词表查证兜底，避免误还原）
 function lemmatize(word) {
   const w = word.toLowerCase();
+  if (WORD_INDEX && WORD_INDEX[w]) return w;
   if (IRREGULAR[w]) return IRREGULAR[w];
+  for (const [lemma, plural] of Object.entries(IRREG_NOUN)) {
+    if (plural === w && WORD_INDEX && WORD_INDEX[lemma]) return lemma;
+  }
   const L = w.length;
-
-  // 优先用词表验证：如果原词就在词表，直接返回
-  if (CET4 && CET4[w]) return w;
-
-  // -ies -> -y （studies -> study）
-  if (L > 4 && w.endsWith('ies')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
+  const candidates = [];
+  if (w.endsWith("'s")) candidates.push(w.slice(0, -2));
+  if (L > 4 && /(?:ies|ied)$/.test(w)) candidates.push(w.slice(0, -3) + 'y');
+  if (L > 3 && w.endsWith('es')) candidates.push(w.slice(0, -2), w.slice(0, -1));
+  if (L > 3 && w.endsWith('s') && !/(?:ss|us|is|ous)$/.test(w)) candidates.push(w.slice(0, -1));
+  for (const suffix of ['ing', 'ed', 'er', 'est']) {
+    if (L <= suffix.length + 2 || !w.endsWith(suffix)) continue;
+    const stem = w.slice(0, -suffix.length);
+    candidates.push(stem, stem + 'e');
+    if (stem.endsWith('i')) candidates.push(stem.slice(0, -1) + 'y');
+    if (stem.length > 2 && stem.at(-1) === stem.at(-2)) candidates.push(stem.slice(0, -1));
   }
-  // -es：分两种情况
-  if (L > 3 && w.endsWith('es')) {
-    const base = w.slice(0, -2); // 去掉 es
-    // 先试 "去 es" 后的形式（boxes -> box）
-    if (CET4 && CET4[base]) return base;
-    // 再试 "去 s"（makes -> make，其实是 make 的 s）
-    const base2 = w.slice(0, -1); // 去掉 s
-    if (CET4 && CET4[base2]) return base2;
-    // 补 e（makes -> make）
-    const baseE = base + 'e';
-    if (CET4 && CET4[baseE]) return baseE;
-    return base;
-  }
-  // -s -> 去掉（复数/三单）
-  if (L > 3 && w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && !w.endsWith('is') && !w.endsWith('ous')) {
-    const cand = w.slice(0, -1);
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // -ing
-  if (L > 5 && w.endsWith('ing')) {
-    let stem = w.slice(0, -3);
-    if (stem.length > 2 && stem[stem.length-1] === stem[stem.length-2]) {
-      stem = stem.slice(0, -1); // running -> run
-    }
-    const candidates = [stem, stem + 'e'];
-    for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
-    }
-    return stem;
-  }
-  // -ied -> -y （studied -> study）
-  if (L > 4 && w.endsWith('ied')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // -ed
-  if (L > 4 && w.endsWith('ed')) {
-    let stem = w.slice(0, -2);
-    if (stem.length > 2 && stem[stem.length-1] === stem[stem.length-2]) {
-      stem = stem.slice(0, -1); // stopped -> stop
-    }
-    const candidates = [stem, stem + 'e'];
-    for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
-    }
-    return stem;
-  }
-  // -er 比较级（happier -> happy, bigger -> big）
-  if (L > 4 && w.endsWith('er') && w.endsWith('ier') === false) {
-    const base = w.slice(0, -2);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
-  }
-  // -ier -> -y（happier -> happy）
-  if (L > 4 && w.endsWith('ier')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // 双写+er（bigger -> big）
-  if (L > 5 && w.endsWith('er') && w[w.length-3] === w[w.length-4]) {
-    const cand = w.slice(0, -3);
-    if (CET4 && CET4[cand]) return cand;
-  }
-  // -est 最高级
-  if (L > 5 && w.endsWith('est')) {
-    const base = w.slice(0, -3);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
-    if (base.endsWith('i')) return base.slice(0, -1) + 'y'; // happiest -> happy
+  for (const candidate of candidates) {
+    if (WORD_INDEX && WORD_INDEX[candidate]) return candidate;
   }
   return w;
 }
 
-// ============ 3. 四级词匹配（返回原词 + 匹配到的四级词根） ============
-// 匹配：先直接命中，再还原后命中。返回 { surface: 原词, lemma: 词根, meaning }
-function matchCET4(word, cet4Map) {
+// ============ 3. 多词库匹配（一次返回全部命中类别） ============
+function matchVocabulary(word, index) {
   const w = word.toLowerCase();
-  if (cet4Map[w]) return { surface: w, lemma: w, meaning: cet4Map[w] };
-  const lemma = lemmatize(w);
-  if (lemma !== w && cet4Map[lemma]) {
-    return { surface: w, lemma: lemma, meaning: cet4Map[lemma] };
-  }
-  return null;
+  const lemma = index[w] ? w : lemmatize(w);
+  return index[lemma] ? { surface: w, lemma: lemma, ...index[lemma] } : null;
 }
 
-// 从一条字幕提取四级词，返回原样 surface 词
-function extractCET4Words(text, cet4Map) {
+// 从一条字幕提取词库并集，保留 surface 和连字符词。
+function extractVocabularyWords(text, index) {
   const found = new Set();
-  const tokens = text.toLowerCase().split(/[^a-z']+/).filter(Boolean);
+  const tokens = text.toLowerCase().replace(/’/g, "'").match(/[a-z]+(?:['-][a-z]+)*/g) || [];
   for (const tok of tokens) {
-    const clean = tok.replace(/^'+|'+$/g, '');
-    if (clean.length < 2) continue;
-    const m = matchCET4(clean, cet4Map);
-    if (m) found.add(m.surface); // 保留字幕原样
+    const parts = matchVocabulary(tok, index) ? [tok] : tok.split('-');
+    for (const part of parts) {
+      if (part.length < 2) continue;
+      const match = matchVocabulary(part, index);
+      if (match) found.add(match.surface);
+    }
   }
   return Array.from(found);
 }
@@ -188,19 +182,20 @@ function fmtTime(sec) {
 const MAX_TIMES = 10; // 每个词最多保留前 10 个时间点
 
 async function processCaptions(msg) {
-  const cet4Map = await loadCET4();
+  const index = await loadVocabularies();
   const { videoId, title, cues } = msg;
 
   const wordMap = new Map(); // surface -> { meaning, lemma, times }
 
   for (const cue of cues) {
-    const words = extractCET4Words(cue.text, cet4Map);
+    const words = extractVocabularyWords(cue.text, index);
     for (const surface of words) {
-      const m = matchCET4(surface, cet4Map);
+      const m = matchVocabulary(surface, index);
       if (!wordMap.has(surface)) {
         wordMap.set(surface, {
           meaning: m ? m.meaning : '',
           lemma: m ? m.lemma : surface,
+          categories: m ? m.categories : [],
           times: [],
         });
       }
@@ -218,6 +213,7 @@ async function processCaptions(msg) {
       word: word,          // 字幕原样
       lemma: data.lemma,   // 还原词根
       meaning: data.meaning,
+      categories: data.categories,
       times: uniqueTimes.slice(0, MAX_TIMES), // 只保留前 10 个
     });
   }
@@ -232,11 +228,11 @@ async function processCaptions(msg) {
     totalWords: result.length,
     capturedAt: Date.now(),
     source: msg.source || 'unknown',
+    vocabularyVersion: 1,
   };
 
-  chrome.storage.local.set({ [key]: record });
-  chrome.storage.local.set({ lastVideoId: videoId });
-  return record;
+  await chrome.storage.local.set({ [key]: record, lastVideoId: videoId });
+  return filterRecordForDisplay(record);
 }
 
 // ============ 5. 词形变化生成器（本地，秒出，不联网） ============
@@ -505,16 +501,15 @@ async function lookupWordOnline(word) {
   }
 }
 
-// 找词表内的同根词（共享词根，且存在于四级词表中）
-function findCognates(lemma, cet4Map) {
+// 找内置词表中的同根候选词（按前缀匹配）。
+function findCognates(lemma, index) {
   const results = new Set();
-  const root = lemma.length > 5 ? lemma.slice(0, 5) : lemma;
   // 用前 4~6 个字母做词根前缀匹配，控制误报
   const prefixes = [];
   for (let n = Math.min(6, lemma.length); n >= 3; n--) {
     prefixes.push(lemma.slice(0, n));
   }
-  for (const key of Object.keys(cet4Map)) {
+  for (const key of Object.keys(index)) {
     if (key === lemma) continue;
     for (const p of prefixes) {
       if (key.startsWith(p) && Math.abs(key.length - lemma.length) <= 6) {
@@ -584,21 +579,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
-      // 本地数据（秒出）：原型、四级释义（精简）、单词变形、同根词
+      case 'GET_VOCABULARY': {
+        await loadVocabularies();
+        const data = await chrome.storage.local.get('selectedVocabulary');
+        const selectedVocabulary = VOCABULARIES.includes(data.selectedVocabulary) ? data.selectedVocabulary : 'cet4';
+        sendResponse({ ok: true, selectedVocabulary });
+        break;
+      }
+
+      case 'SET_VOCABULARY': {
+        if (!VOCABULARIES.includes(msg.selectedVocabulary)) throw new Error('不支持的词库');
+        await chrome.storage.local.set({ selectedVocabulary: msg.selectedVocabulary });
+        sendResponse({ ok: true, selectedVocabulary: msg.selectedVocabulary });
+        break;
+      }
+
+      // 本地数据：原型、全部类别、词表释义、单词变形、同根词
       case 'LOOKUP_LOCAL': {
-        const cet4Map = await loadCET4();
+        const index = await loadVocabularies();
         const word = (msg.word || '').toLowerCase();
-        const lemma = lemmatize(word);
-        const base = lemma !== word && cet4Map[lemma] ? lemma : (cet4Map[word] ? word : lemma);
-        const rawMeaning = cet4Map[base] || '';
-        const cognates = findCognates(base, cet4Map);
+        const match = matchVocabulary(word, index);
+        const base = match ? match.lemma : word;
+        const rawMeaning = match ? match.meaning : '';
+        const cognates = findCognates(base, index);
         sendResponse({
           ok: true,
           surface: word,
-          lemma: lemma !== word ? lemma : null,
+          lemma: base !== word ? base : null,
           base: base,
-          cet4Meaning: trimMeaning(rawMeaning, 2),   // 精简：每词性最多 2 个常用释义
-          inflections: inflect(base, rawMeaning),    // 单词变形（本地算，秒出）
+          categories: match ? match.categories : [],
+          localMeaning: trimMeaning(rawMeaning, 2),
+          inflections: rawMeaning ? inflect(base, rawMeaning) : {},
           cognates: cognates,
         });
         break;
@@ -616,7 +627,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const videoId = msg.videoId;
         const key = 'video_' + videoId;
         const data = await chrome.storage.local.get([key, 'familiarWords']);
-        sendResponse({ ok: true, record: data[key] || null, familiar: data.familiarWords || [] });
+        sendResponse({
+          ok: true,
+          record: await filterRecordForDisplay(data[key] || null),
+          ...await getFamiliarWordsForDisplay(),
+        });
         break;
       }
 
@@ -626,41 +641,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let record = null;
         if (lastId) {
           const d2 = await chrome.storage.local.get('video_' + lastId);
-          record = d2['video_' + lastId] || null;
+          record = await filterRecordForDisplay(d2['video_' + lastId] || null);
         }
-        sendResponse({ ok: true, record: record, familiar: data.familiarWords || [], lastVideoId: lastId });
+        sendResponse({ ok: true, record: record, ...await getFamiliarWordsForDisplay(), lastVideoId: lastId });
         break;
       }
 
       case 'SLASH_WORD': {
-        const list = await slashWord(msg.word);
-        sendResponse({ ok: true, familiar: list });
+        await slashWord(msg.word);
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'UNSLASH_WORD': {
-        const list = await unslashWord(msg.word);
-        sendResponse({ ok: true, familiar: list });
+        await unslashWord(msg.word);
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'GET_FAMILIAR': {
-        const data = await chrome.storage.local.get('familiarWords');
-        sendResponse({ ok: true, familiar: data.familiarWords || [] });
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'CLEAR_FAMILIAR': {
         await chrome.storage.local.remove('familiarWords');
-        sendResponse({ ok: true, familiar: [] });
+        sendResponse({ ok: true, familiar: [], familiarEntries: [] });
         break;
       }
 
       case 'GET_ALL_VIDEOS': {
         const all = await chrome.storage.local.get(null);
-        const videos = Object.keys(all)
+        const videos = await Promise.all(Object.keys(all)
           .filter((k) => k.startsWith('video_'))
-          .map((k) => all[k]);
+          .map((k) => filterRecordForDisplay(all[k])));
         videos.sort((a, b) => b.capturedAt - a.capturedAt);
         sendResponse({ ok: true, videos: videos });
         break;
@@ -669,7 +683,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       default:
         sendResponse({ ok: false, error: 'unknown type' });
     }
-  })();
+  })().catch((error) => {
+    console.error('[Naiwa] 消息处理失败', error);
+    sendResponse({ ok: false, error: error.message || '处理失败，请重新加载扩展' });
+  });
 
   return true;
 });

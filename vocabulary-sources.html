@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>词表来源 · 奶娃过四级</title>
+  <style>
+    body { max-width: 820px; margin: 40px auto; padding: 0 24px; font: 16px/1.8 system-ui, "Microsoft YaHei", sans-serif; color: #1f2328; }
+    h1 { font-size: 26px; } h2 { font-size: 20px; margin-top: 30px; }
+    a { color: #4f46e5; overflow-wrap: anywhere; }
+    .note { padding: 14px 18px; background: #fff3db; border-radius: 8px; }
+    footer { border-top: 1px solid #e5e7eb; margin-top: 32px; padding-top: 16px; font-size: 14px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>词表来源与许可</h1>
+  <p>标签表示单词命中本扩展内置的学习词表，不表示该单词仅属于某项考试，也不保证覆盖考试全部词汇。重叠的词会显示所有命中标签。</p>
+  <h2>四级 · 4,590 词</h2>
+  <p>沿用项目原有词库：<a href="https://github.com/eeliu/english-vocabulary" target="_blank" rel="noopener">eeliu/english-vocabulary</a> 的「四级-乱序」4,538 词，加原项目补充的 52 个基础高频词。保留已有中文释义。</p>
+  <h2>六级 · 2,219 词</h2>
+  <p>作者：OpenEtymology；词表：<a href="https://github.com/openetymology/OpenEtymology/blob/7d89f3697abf26e305fe2627f181b692c2c10b28/CET6/CET6.txt" target="_blank" rel="noopener">OpenEtymology CET6</a>。源版本：7d89f3697abf26e305fe2627f181b692c2c10b28。</p>
+  <p>原公开词表及本项目整理后的 <a href="cet6_words.json">cet6_words.json</a> 使用 <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">Creative Commons Attribution-ShareAlike 4.0 International（CC BY-SA 4.0）</a>。变更：词头转小写、排序、转为 JSON；没有新增释义。<a href="licenses/cet6-LICENSE.txt">上游原始数据许可声明</a>。</p>
+  <h2>雅思选项 · 1,000 词</h2>
+  <p class="note">这是社区整理、含 AI 增补内容的 TOEFL / IELTS 共用学术词表，非官方雅思词表，非雅思专属。英文释义来自原数据，可能需要人工核对。</p>
+  <p>作者：gungorkaya-eng / <a href="https://wordlevel.net" target="_blank" rel="noopener">WordLevel</a>；来源：<a href="https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset/blob/85d4392a2254d2a1ad73cf12cdd8898b49cd3295/toefl_essential_vocabulary.json" target="_blank" rel="noopener">TOEFL &amp; IELTS Essential Vocabulary Dataset</a>。源版本：85d4392a2254d2a1ad73cf12cdd8898b49cd3295。</p>
+  <p>使用 <a href="licenses/ielts-LICENSE.txt">MIT License（含原版权与许可全文）</a>。变更：词头转小写、排序、只提取词头、词性与原英文释义；未生成中文翻译。</p>
+  <h2>释义与更新</h2>
+  <p>重叠词优先使用已有四级中文释义，其次使用共用学术词表英文释义。仅命中六级且没有本地释义的词，可点击单词联网查询。词表打包在扩展内，识别时无需联网下载。</p>
+  <p>采集日期：2026-10-10。源文件和整理文件的 SHA-256、固定源版本及条目数见 <a href="vocabulary-sources.json">来源元数据</a>。项目中的 scripts/import-vocabularies.py 可从固定版本重建两份新增词表。</p>
+  <footer>代码许可与数据许可分别适用；六级词表的后续改编和分发须保留署名并遵循 CC BY-SA 4.0。</footer>
+</body>
+</html>

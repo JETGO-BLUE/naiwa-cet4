@@ -4,6 +4,10 @@
 
 let currentRecord = null;
 let familiarWords = [];
+let familiarEntries = [];
+let selectedVocabulary = 'cet4';
+const VOCABULARY_LABELS = { cet4: '四级', cet6: '六级', ielts: '雅思' };
+let uiError = '';
 let currentTab = 'current';
 let searchKeyword = '';
 
@@ -11,7 +15,8 @@ let searchKeyword = '';
 function send(msg) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(msg, (resp) => {
-      resolve(resp);
+      const error = chrome.runtime.lastError;
+      resolve(error ? { ok: false, error: error.message } : (resp || { ok: false, error: '扩展未响应，请重新加载扩展' }));
     });
   });
 }
@@ -40,6 +45,28 @@ let lastStatus = null;
 let contentAlive = null; // null=未知, true=content 响应了, false=没注入
 let contentDebug = null; // content 返回的诊断信息
 async function init() {
+  const picker = document.getElementById('vocabularySelect');
+  picker.disabled = true;
+  const settings = await send({ type: 'GET_VOCABULARY' });
+  picker.disabled = false;
+  if (!settings.ok) {
+    uiError = settings.error;
+    lastStatus = { type: 'error', error: settings.error };
+    render();
+    return;
+  }
+  selectedVocabulary = settings.selectedVocabulary;
+  picker.value = selectedVocabulary;
+  uiError = '';
+  currentRecord = null;
+  const familiar = await send({ type: 'GET_FAMILIAR' });
+  if (!familiar.ok) {
+    uiError = familiar.error;
+    lastStatus = { type: 'error', error: familiar.error };
+    render();
+    return;
+  }
+  updateFamiliar(familiar);
   // 1) 先问当前标签页 content script（实时累积，不用等存储）
   const cs = await sendToContent({ type: 'GET_STATE' });
   contentAlive = !!(cs && cs.ok);
@@ -56,9 +83,13 @@ async function init() {
     });
     if (rec && rec.ok && rec.record) {
       currentRecord = rec.record;
-      const fam = await send({ type: 'GET_FAMILIAR' });
-      familiarWords = fam.familiar || [];
       lastStatus = null;
+      render();
+      return;
+    }
+    if (!rec.ok) {
+      uiError = rec.error;
+      lastStatus = { type: 'error', error: rec.error };
       render();
       return;
     }
@@ -68,22 +99,55 @@ async function init() {
   const resp = await send({ type: 'GET_LAST_VIDEO' });
   if (resp && resp.ok && resp.record) {
     currentRecord = resp.record;
-    familiarWords = resp.familiar || [];
+    updateFamiliar(resp);
     lastStatus = null;
+    render();
+    return;
+  }
+  if (!resp.ok) {
+    uiError = resp.error;
+    lastStatus = { type: 'error', error: resp.error };
     render();
     return;
   }
 
   // 3) 没有视频记录，查状态（无字幕/错误）
   const st = await send({ type: 'GET_STATUS' });
-  if (st && st.ok && st.status) {
-    lastStatus = st.status;
-  }
+  lastStatus = st.ok ? st.status : { type: 'error', error: st.error };
   render();
+}
+
+function updateFamiliar(resp) {
+  if (!resp || !resp.ok) {
+    uiError = resp && resp.error ? resp.error : '读取已斩词失败';
+    return;
+  }
+  familiarWords = resp.familiar || [];
+  familiarEntries = resp.familiarEntries || [];
+}
+
+function selectedWords(words) {
+  return (words || []).filter((item) => (item.categories || []).includes(selectedVocabulary));
+}
+
+function vocabularyTags(categories) {
+  return '<span class="vocabulary-tags">' + (categories || [])
+    .filter((category) => Object.hasOwn(VOCABULARY_LABELS, category))
+    .map((category) => `<span class="vocabulary-tag ${category}"${category === 'ielts' ? ' title="社区 TOEFL/IELTS 共用学术词表，非官方"' : ''}>${VOCABULARY_LABELS[category]}</span>`)
+    .join('') + '</span>';
+}
+
+function renderVocabularyStatus() {
+  const status = document.getElementById('vocabularyStatus');
+  status.textContent = uiError || (selectedVocabulary === 'ielts'
+    ? '社区学术词表，含 TOEFL 词汇，非官方'
+    : '每次选择一个词库，词卡显示全部命中标签');
+  status.classList.toggle('error', !!uiError);
 }
 
 // 渲染当前 tab
 function render() {
+  renderVocabularyStatus();
   const titleEl = document.getElementById('videoTitle');
   if (currentRecord) {
     titleEl.textContent = currentRecord.title || '(无标题)';
@@ -96,6 +160,7 @@ function render() {
   }
   renderCurrent();
   renderFamiliar();
+  if (currentTab === 'history') renderHistory();
 }
 
 // 渲染 content 诊断信息（排查"收不到字幕"用）
@@ -147,7 +212,7 @@ function renderCurrent() {
     return;
   }
 
-  const words = currentRecord.words || [];
+  const words = selectedWords(currentRecord.words);
   const slashedSet = new Set(familiarWords);
   const kw = searchKeyword.trim().toLowerCase();
 
@@ -159,20 +224,23 @@ function renderCurrent() {
     return true;
   });
 
-  const shownCount = shown.length;
   const slashedCount = words.filter((w) => slashedSet.has(w.word)).length;
   const activeCount = words.filter((w) => !slashedSet.has(w.word)).length;
 
   // 顶部统计
   let statsHtml = `
     <div class="stats">
-      <div class="stat"><b>${words.length}</b>四级词</div>
+      <div class="stat"><b>${words.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
       <div class="stat"><b>${activeCount}</b>待记</div>
       <div class="stat"><b>${slashedCount}</b>已斩</div>
     </div>`;
 
+  if (currentRecord.isLegacyVocabulary && selectedVocabulary !== 'cet4') {
+    statsHtml += '<p class="legacy-note">旧记录只采集过四级词，重新抓取可补全新词库。</p>';
+  }
+
   if (words.length === 0) {
-    container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到四级词汇</div>';
+    container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到待学习的' + VOCABULARY_LABELS[selectedVocabulary] + '词汇<br/><span class="muted">基础词已自动隐藏；可切换词库查看其他命中</span></div>';
     return;
   }
 
@@ -185,7 +253,7 @@ function renderCurrent() {
   for (const w of shown) {
     const isSlashed = slashedSet.has(w.word);
     const timesHtml = (w.times || []).slice(0, 10)
-      .map((t) => `<span class="time-tag">${t}</span>`)
+      .map((t) => `<span class="time-tag">${escapeHtml(t)}</span>`)
       .join('');
     const lemmaHint = w.lemma && w.lemma !== w.word
       ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
@@ -195,7 +263,8 @@ function renderCurrent() {
         <div class="word-head">
           <div class="word-left word-clickable" data-word="${escapeHtml(w.word)}">
             <div class="word-text">${escapeHtml(w.word)}${lemmaHint}</div>
-            <div class="word-meaning">${escapeHtml(w.meaning || '')}</div>
+            ${vocabularyTags(w.categories)}
+            <div class="word-meaning">${escapeHtml(w.meaning || '点击单词联网查释义')}</div>
           </div>
           <button class="slash-btn ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
             ${isSlashed ? '已斩 ✓' : '斩'}
@@ -220,13 +289,8 @@ function renderCurrent() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const word = btn.getAttribute('data-word');
-      if (familiarWords.includes(word)) {
-        await send({ type: 'UNSLASH_WORD', word: word });
-      } else {
-        await send({ type: 'SLASH_WORD', word: word });
-      }
-      const resp = await send({ type: 'GET_FAMILIAR' });
-      familiarWords = resp.familiar || [];
+      const resp = await send({ type: familiarWords.includes(word) ? 'UNSLASH_WORD' : 'SLASH_WORD', word: word });
+      updateFamiliar(resp);
       render();
     });
   });
@@ -235,13 +299,14 @@ function renderCurrent() {
 // 渲染已斩词列表
 function renderFamiliar() {
   const container = document.getElementById('familiarContent');
-  if (familiarWords.length === 0) {
-    container.innerHTML = '<div class="empty"><div class="icon">✂️</div>还没有斩掉任何单词<br/>在单词卡片上点「斩」即可标记为熟悉词</div>';
+  const entries = selectedWords(familiarEntries);
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="empty"><div class="icon">✂️</div>这个词库还没有已斩词<br/>在单词卡片上点「斩」即可标记为熟悉词</div>';
     return;
   }
   let html = '<div class="familiar-list">';
-  for (const w of familiarWords) {
-    html += `<span class="familiar-item">${escapeHtml(w)} <span class="undo" data-word="${escapeHtml(w)}">✕</span></span>`;
+  for (const item of entries) {
+    html += `<span class="familiar-item">${escapeHtml(item.word)} ${vocabularyTags(item.categories)}<span class="undo" data-word="${escapeHtml(item.word)}">✕</span></span>`;
   }
   html += '</div>';
   container.innerHTML = html;
@@ -249,9 +314,8 @@ function renderFamiliar() {
   container.querySelectorAll('.undo').forEach((el) => {
     el.addEventListener('click', async () => {
       const word = el.getAttribute('data-word');
-      await send({ type: 'UNSLASH_WORD', word: word });
-      const resp = await send({ type: 'GET_FAMILIAR' });
-      familiarWords = resp.familiar || [];
+      const resp = await send({ type: 'UNSLASH_WORD', word: word });
+      updateFamiliar(resp);
       render();
     });
   });
@@ -261,6 +325,10 @@ function renderFamiliar() {
 async function renderHistory() {
   const container = document.getElementById('historyContent');
   const resp = await send({ type: 'GET_ALL_VIDEOS' });
+  if (!resp.ok) {
+    container.innerHTML = '<div class="empty">' + escapeHtml(resp.error) + '</div>';
+    return;
+  }
   const videos = resp.videos || [];
   if (videos.length === 0) {
     container.innerHTML = '<div class="empty"><div class="icon">📦</div>暂无历史记录</div>';
@@ -270,9 +338,10 @@ async function renderHistory() {
   for (const v of videos) {
     const date = new Date(v.capturedAt).toLocaleString('zh-CN', { hour12: false });
     html += `
-      <div class="video-item" data-video="${v.videoId}">
+      <div class="video-item" data-video="${escapeHtml(v.videoId)}">
         <div class="v-title">${escapeHtml(v.title || v.videoId)}</div>
-        <div class="v-meta">${v.totalWords} 个四级词 · ${date}</div>
+        <div class="v-meta">${selectedWords(v.words).length} 个${VOCABULARY_LABELS[selectedVocabulary]}词 · ${date}</div>
+        ${v.isLegacyVocabulary && selectedVocabulary !== 'cet4' ? '<div class="v-meta">旧记录只含原四级采集结果</div>' : ''}
       </div>`;
   }
   container.innerHTML = html;
@@ -283,9 +352,12 @@ async function renderHistory() {
       const r = await send({ type: 'GET_VIDEO', videoId: videoId });
       if (r.ok && r.record) {
         currentRecord = r.record;
-        familiarWords = r.familiar || [];
+        updateFamiliar(r);
         switchTab('current');
         render();
+      } else if (!r.ok) {
+        uiError = r.error;
+        renderVocabularyStatus();
       }
     });
   });
@@ -314,6 +386,21 @@ function escapeHtml(s) {
 }
 
 // 事件绑定
+document.getElementById('vocabularySelect').addEventListener('change', async (e) => {
+  const picker = e.target;
+  picker.disabled = true;
+  const resp = await send({ type: 'SET_VOCABULARY', selectedVocabulary: picker.value });
+  picker.disabled = false;
+  if (resp.ok) {
+    selectedVocabulary = resp.selectedVocabulary;
+    uiError = '';
+  } else {
+    picker.value = selectedVocabulary;
+    uiError = resp.error;
+  }
+  render();
+});
+
 document.querySelectorAll('.tab').forEach((t) => {
   t.addEventListener('click', () => switchTab(t.getAttribute('data-tab')));
 });
@@ -327,7 +414,7 @@ document.getElementById('recaptureBtn').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && tab.id) {
     chrome.tabs.sendMessage(tab.id, { type: 'RECAPTURE' }, () => {
-      // content script 可能未加载，忽略错误
+      void chrome.runtime.lastError; // content script 可能未加载
     });
   }
   setTimeout(async () => {
@@ -337,19 +424,23 @@ document.getElementById('recaptureBtn').addEventListener('click', async () => {
 
 document.getElementById('clearFamiliarBtn').addEventListener('click', async () => {
   if (!confirm('确定清空所有已斩单词吗？')) return;
-  await send({ type: 'CLEAR_FAMILIAR' });
-  familiarWords = [];
+  const resp = await send({ type: 'CLEAR_FAMILIAR' });
+  updateFamiliar(resp);
   render();
 });
 
 // ============ 单词详情弹窗 ============
 // 两阶段渲染：本地数据（原型/精简释义/单词变形/同根词）先秒出，联网释义后补
+let detailRequest = 0;
 async function openDetail(word) {
   const panel = document.getElementById('detailPanel');
+  const request = ++detailRequest;
   panel.classList.add('open');
+  document.getElementById('detailBox').innerHTML = '<div class="detail-loading">正在查询…</div>';
 
   // 第一阶段：本地，秒出
   const local = await send({ type: 'LOOKUP_LOCAL', word: word });
+  if (request !== detailRequest || !panel.classList.contains('open')) return;
   if (!local || !local.ok) {
     document.getElementById('detailBox').innerHTML = '<div class="detail-error">查询失败</div>';
     return;
@@ -358,6 +449,7 @@ async function openDetail(word) {
 
   // 第二阶段：联网，慢，到了再补
   const resp = await send({ type: 'LOOKUP_ONLINE', word: local.base || word });
+  if (request !== detailRequest || !panel.classList.contains('open')) return;
   fillOnline(resp && resp.online ? resp.online : null);
 }
 
@@ -379,10 +471,8 @@ function renderDetailLocal(surface, resp) {
     html += `<div class="detail-lemma">字幕原形「${escapeHtml(surface)}」→ 原型 ${escapeHtml(resp.lemma)}</div>`;
   }
 
-  // 四级释义（已精简：每词性最多 2 个常用释义，偏门已删）
-  if (resp.cet4Meaning) {
-    html += `<div class="detail-section"><h4>四级释义（常用）</h4><div class="def-item">${escapeHtml(resp.cet4Meaning)}</div></div>`;
-  }
+  html += vocabularyTags(resp.categories);
+  html += `<div class="detail-section"><h4>本地词表释义</h4><div class="def-item">${escapeHtml(resp.localMeaning || '此词表仅提供词头，释义见下方联网结果。')}</div></div>`;
 
   // 单词变形（本地算，秒出）
   const infl = resp.inflections || {};
@@ -400,7 +490,7 @@ function renderDetailLocal(surface, resp) {
 
   // 同根词
   if (resp.cognates && resp.cognates.length > 0) {
-    html += `<div class="detail-section"><h4>同根词（四级词表内）</h4><div class="syn-ant">`;
+    html += `<div class="detail-section"><h4>同根词（内置词表内）</h4><div class="syn-ant">`;
     resp.cognates.forEach((c) => { html += `<span class="cog-chip">${escapeHtml(c)}</span>`; });
     html += `</div></div>`;
   }
@@ -434,7 +524,7 @@ function fillOnline(online) {
     sec.innerHTML = html;
   } else {
     const err = online && online.error ? online.error : '未查到';
-    sec.innerHTML = `<h4>各词性释义</h4><div class="muted" style="padding:6px 0">${escapeHtml(err)}，以上方四级释义为准。</div>`;
+    sec.innerHTML = `<h4>各词性释义</h4><div class="muted" style="padding:6px 0">${escapeHtml(err)}；若有本地释义，可先参考上方内容。</div>`;
   }
 }
 

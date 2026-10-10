@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "retrieved_on": "2026-10-10",
+  "sources": {
+    "cet6": {
+      "title": "OpenEtymology CET6",
+      "repository": "https://github.com/openetymology/OpenEtymology",
+      "commit": "7d89f3697abf26e305fe2627f181b692c2c10b28",
+      "path": "CET6/CET6.txt",
+      "sha256": "9a8fa3f2464a39526472211228ef1f331ab1e3d67567b11eea49efc7444d5647",
+      "count": 2219,
+      "license": "CC-BY-SA-4.0",
+      "license_path": "DATA_LICENSE.md",
+      "description": "公开六级词表；仅词头，无释义。",
+      "source_url": "https://github.com/openetymology/OpenEtymology/blob/7d89f3697abf26e305fe2627f181b692c2c10b28/CET6/CET6.txt",
+      "license_url": "https://github.com/openetymology/OpenEtymology/blob/7d89f3697abf26e305fe2627f181b692c2c10b28/DATA_LICENSE.md",
+      "output_file": "cet6_words.json",
+      "output_sha256": "cbaca5db9b833e4e586ad62de86c22516faacacbf1947d2d0ff6d5622040bdc7",
+      "changes": "词头转小写、按字母排序、转为项目 JSON 格式；原数据仅词头，未新增释义。"
+    },
+    "ielts": {
+      "title": "WordLevel TOEFL & IELTS Essential Vocabulary",
+      "repository": "https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset",
+      "commit": "85d4392a2254d2a1ad73cf12cdd8898b49cd3295",
+      "path": "toefl_essential_vocabulary.json",
+      "sha256": "1771a0b444f8a3141339c07474336fdf1336d2f966bef3d13a2a8fd64f9ea885",
+      "count": 1000,
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "description": "社区、AI 增补的 TOEFL/IELTS 共用学术词表，非官方、非雅思专属。保留英文释义。",
+      "source_url": "https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset/blob/85d4392a2254d2a1ad73cf12cdd8898b49cd3295/toefl_essential_vocabulary.json",
+      "license_url": "https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset/blob/85d4392a2254d2a1ad73cf12cdd8898b49cd3295/LICENSE",
+      "output_file": "ielts_words.json",
+      "output_sha256": "0c0c105b54afff3e88b0cebd1e6e75c7e5deb6a35493ce90df51f4acc5221b0d",
+      "changes": "词头转小写、按字母排序、转为项目 JSON 格式；保留原英文释义与词性，未生成中文释义。"
+    }
+  }
+}
