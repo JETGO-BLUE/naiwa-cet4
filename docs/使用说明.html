@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>使用说明 · 奶娃过四级</title>
+<meta name="description" content="奶娃过四级浏览器扩展的安装与使用说明：如何加载扩展、怎么收集四级词汇、界面说明、常见问题排查。">
+<style>:root{
+    --bg:#fbfaf8; --card:#ffffff; --text:#23201c; --muted:#6b6459;
+    --line:#e8e3da; --accent:#c2572a; --accent-soft:#fdf1ea;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:820px;margin:0 auto;padding:0 22px}
+  header{
+    background:linear-gradient(160deg,#fff6f0 0%,#fdf1ea 55%,#fbfaf8 100%);
+    border-bottom:1px solid var(--line);padding:26px 0;
+  }
+  header .wrap{display:flex;align-items:center;gap:12px}
+  header img{width:38px;height:38px;border-radius:10px}
+  header b{font-size:16px;font-weight:600}
+  header .back{margin-left:auto;color:var(--accent);text-decoration:none;font-size:14px;font-weight:600}
+  header .back:hover{text-decoration:underline}
+  main{padding:34px 0 72px}
+  main h1{
+    font-size:30px;line-height:1.35;letter-spacing:-.4px;margin:0 0 26px;
+    padding-bottom:18px;border-bottom:1px solid var(--line);
+  }
+  main h2{font-size:23px;letter-spacing:-.2px;margin:46px 0 14px}
+  main h2::before{
+    content:"";display:inline-block;width:4px;height:19px;border-radius:2px;
+    background:var(--accent);margin-right:11px;vertical-align:-3px;
+  }
+  main h3{font-size:17.5px;margin:28px 0 10px}
+  main p{margin:13px 0}
+  main ul,main ol{padding-left:26px;margin:13px 0}
+  main li{margin:7px 0}
+  main li>ul,main li>ol{margin:8px 0}
+  main a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(194,87,42,.32)}
+  main a:hover{border-bottom-color:var(--accent)}
+  main strong{font-weight:600}
+  main hr{border:0;border-top:1px solid var(--line);margin:38px 0}
+  main code{
+    background:#f4f1ec;padding:2px 7px;border-radius:5px;
+    font:13.5px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all;
+  }
+  main pre{
+    background:#f7f4ef;border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;overflow-x:auto;margin:14px 0;
+  }
+  main pre code{background:none;padding:0;font-size:13.5px;word-break:normal}
+  main blockquote{
+    margin:20px 0;padding:14px 18px;border-radius:10px;
+    background:var(--accent-soft);border:1px solid #f2dccd;color:#5c4b3e;font-size:15px;
+  }
+  main blockquote p{margin:0}
+  main table{
+    width:100%;border-collapse:collapse;margin:18px 0;font-size:15px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  }
+  main th,main td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  main thead th{background:#faf7f3;font-weight:600}
+  main tbody tr:last-child td{border-bottom:0}
+  footer{
+    border-top:1px solid var(--line);padding:24px 0 44px;text-align:center;
+    color:var(--muted);font-size:13.5px;
+  }
+  footer a{color:var(--accent);text-decoration:none;margin:0 9px}
+  footer a:hover{text-decoration:underline}
+  @media (max-width:560px){
+    main h1{font-size:24px}
+    main h2{font-size:20px}
+  }</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <img src="store-assets/store-logo-300.png" alt="奶娃过四级">
+    <b>使用说明</b>
+    <a class="back" href="index.html">← 返回首页</a>
+  </div>
+</header>
+
+<main class="wrap">
+<h1>奶娃过四级 · 安装 &amp; 使用说明</h1>
+<p>一个 Chrome/Edge 扩展，抓取视频字幕里的<strong>四级词汇</strong>（优先读取「沉浸式翻译」的双语字幕），去重、标注出现时间点，还能像百词斩一样「斩」掉熟悉词。</p>
+<hr>
+<h2>一、安装（3 步）</h2>
+<p><strong>Chrome</strong>：地址栏输入 <code>chrome://extensions/</code> 回车</p>
+<p><strong>Edge</strong>：地址栏输入 <code>edge://extensions/</code> 回车（同一份代码，Edge 直接可用，无需改动）</p>
+<ol>
+<li>打开上面的扩展管理页</li>
+<li>打开 <strong>「开发者模式」</strong> 开关（Chrome 在右上角，Edge 在左下角）</li>
+<li>点 <strong>「加载已解压的扩展程序」</strong>，选中你解压出来的那个文件夹 —— <strong>要选到「含 <code>manifest.json</code> 的那一层」</strong>，不要选它的上一层</li>
+</ol>
+<p>装好后工具栏会出现<strong>奶娃头像</strong>图标（扩展名：奶娃过四级）。</p>
+<blockquote>⚠️ 因为权限覆盖所有网站，加载或更新后浏览器可能提示"已更改权限"，点扩展卡片上的<strong>刷新</strong>按钮即可。 Chrome 和 Edge 可以同时装同一份，但两边的「已斩词」数据<strong>各自独立</strong>、不互通。</blockquote>
+<hr>
+<h2>二、怎么用</h2>
+<ol>
+<li>打开任意一个<strong>有字幕</strong>的视频（YouTube / Netflix / B站等，配合「沉浸式翻译」最好）</li>
+<li>让视频播放，双语字幕一句句出现时，本扩展会<strong>边看边自动累积</strong>单词</li>
+<li>点工具栏的 📚 图标查看已收集的四级词汇，每个词后面跟着它在视频里出现的<strong>时间点</strong>（mm:ss，最多显示前 10 个）</li>
+<li>看到熟悉的词，点右边的 <strong>「斩」</strong> → 以后不再显示</li>
+<li><strong>左键单击单词</strong> → 弹出详情（两阶段加载，本地内容秒出）：<ul>
+<li><strong>四级释义（常用）</strong>：每个词性只保留前 2 个常用释义，带【古】/(archaic)/(dated)/(rare) 等偏门标记的自动删除</li>
+<li><strong>单词变形</strong>：复数 / 第三人称单数 / 过去式 / 过去分词 / 现在分词 / 比较级 / 最高级——<strong>本地计算，秒出</strong>，含约 100 个不规则动词 + 40 个不规则名词复数 + 不规则比较级</li>
+<li><strong>各词性释义</strong>：联网查询（主词典 4 秒超时 → 自动切 Wiktionary 兜底，双词典都 404 才放弃，以四级释义为准）</li>
+<li><strong>同根词</strong>（四级词表内）</li>
+</ul></li>
+</ol>
+<blockquote>重要：本扩展<strong>优先读取「沉浸式翻译」渲染的双语字幕</strong>，所以它不再是"一次性抓完全部字幕"，而是<strong>跟着播放进度实时累积</strong>。你看到一个视频多长时间，就收集多少词。没开沉浸式翻译时，自动退回抓 YouTube 原生字幕。</blockquote>
+<hr>
+<h2>三、界面说明</h2>
+<table><thead><tr><th>标签页</th><th>作用</th></tr></thead><tbody><tr><td><strong>当前视频</strong></td><td>当前视频的四级词汇 + 时间点，可搜索、可斩词</td></tr><tr><td><strong>历史记录</strong></td><td>你看过的所有视频的词汇记录，点进去回看</td></tr><tr><td><strong>已斩词</strong></td><td>所有被你「斩」掉的熟悉词，可撤销、可清空</td></tr></tbody></table>
+<hr>
+<h2>四、几个要点（务必看）</h2>
+<ol>
+<li><strong>优先读沉浸式翻译</strong>：本扩展默认监听沉浸式翻译的双语字幕（<code>#immersive-translate-caption-window</code>），只取其中的<strong>英文原文</strong>行，完全<strong>只读、不修改</strong>它的 DOM，不会影响沉浸式翻译的正常显示，也不会影响你看视频。</li>
+<li><strong>没开沉浸式翻译也能用</strong>：会自动退回抓 YouTube 原生字幕轨。但非 YouTube 平台（Netflix/B站）必须靠沉浸式翻译。</li>
+<li><strong>实时累积，不是一次性全量</strong>：沉浸式翻译只渲染"当前这一句"字幕，所以单词是边看边收集的。想收集完整个视频的词，就得把视频看完（或快进）。</li>
+<li><strong>斩词是全局的</strong>：斩掉一个词，以后所有视频里它都不再显示。想恢复去「已斩词」标签页点 ✕。</li>
+<li><strong>时间点最多 10 个</strong>：每个词只保留前 10 个出现时间点。</li>
+<li><strong>词形还原</strong>：<code>studies</code>/<code>studying</code>/<code>studied</code> 会匹配到词根 <code>study</code>，列表按字幕原样显示。</li>
+</ol>
+<hr>
+<h2>五、出问题先看这里（按顺序排查）</h2>
+<p><strong>症状：popup 里显示「未捕获 / 没产出」。</strong></p>
+<ol>
+<li><strong>扩展刷新过没</strong>：改完代码必须去 <code>chrome://extensions/</code> 点扩展的<strong>刷新</strong>按钮。</li>
+<li><strong>页面刷新过没</strong>：content script 是页面加载时注入的——改了扩展代码后，<strong>正在看的视频页要 F5 刷新一次</strong>，不然跑的还是旧脚本（新装扩展同理：先装再开页面，或者开了页面后刷新）。</li>
+<li><strong>沉浸式翻译开了没</strong>：视频上必须能看到英文+中文双语字幕。</li>
+<li><strong>视频播了没</strong>：沉浸式翻译只实时渲染"当前这一句"，<strong>单词是跟着播放一句句累积的</strong>。只打开不播、或播几秒就停，popup 里自然没东西。播 30 秒再点图标。</li>
+<li>popup 会直接告诉你卡在哪一步：<ul>
+<li><strong>「脚本没在这个页面跑起来」</strong> → 就是第 2 步，刷新页面</li>
+<li><strong>「脚本已注入，但还没收到字幕」</strong> → 就是第 3/4 步，开双语字幕 + 继续播</li>
+</ul></li>
+</ol>
+<hr>
+<h2>六、词表来源</h2>
+<p>内置 <strong>4590 个四级词汇</strong>（含中文释义），来源：</p>
+<ol>
+<li>开源词库 <code>github.com/eeliu/english-vocabulary</code> 的「四级-乱序」表（4538 词，进阶核心词）</li>
+<li>手动补充 52 个基础高频词（<code>study</code>/<code>run</code>/<code>take</code>/<code>write</code> 等四级必考但原表剔除的基础词）</li>
+</ol>
+<p>如果你想要更全的词表，可以自行替换 <code>cet4_words.json</code>（格式：<code>{"word": "释义", ...}</code>），改完在 <code>chrome://extensions/</code> 里点扩展的「刷新」按钮。</p>
+<p><strong>联网查词</strong>：点击单词时调用 <a href="https://dictionaryapi.dev/">Free Dictionary API</a>（免费、无需 key）获取音标、多词性释义、例句、同反义词。需要联网。</p>
+<hr>
+<h2>七、已知限制</h2>
+<ul>
+<li>只支持 <strong>字幕</strong>，不支持纯语音识别（语音转文字需要联网 API + 付费，暂不做）。</li>
+<li>时间点为<strong>文字</strong>展示（mm:ss），不做点击跳转。</li>
+<li>第一次打开某个视频可能要等字幕加载完（通常 1~3 秒），没抓到就点「重新抓取」。</li>
+</ul>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="index.html">首页</a> ·
+      <a href="privacy.html">隐私政策</a> ·
+      <a href="https://github.com/JETGO-BLUE/naiwa-cet4">GitHub 仓库</a>
+    </p>
+    <p>© 2026 奶娃过四级 · MIT License · 与 YouTube、Microsoft、沉浸式翻译等第三方无任何关联</p>
+  </div>
+</footer>
+
+</body>
+</html>
