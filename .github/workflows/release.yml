@@ -1,0 +1,76 @@
+name: Release
+
+# 打 tag（如 v1.2.0）时自动打包商店可用的 zip，并创建 GitHub Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的版本号（例如 v1.2.0）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 打包并发布
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 校验 manifest 与版本一致性
+        run: |
+          node -e "
+          const fs=require('fs');
+          const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+          const tag='${{ github.event.inputs.tag || github.ref_name }}'.replace(/^v/,'');
+          console.log('manifest version = ' + m.version + ' / tag version = ' + tag);
+          if (m.version !== tag) {
+            console.error('❌ manifest.json 里的 version (' + m.version + ') 与 tag (' + tag + ') 不一致，请先改 manifest 再打 tag');
+            process.exit(1);
+          }
+          console.log('✅ 版本号一致');
+          "
+
+      - name: 打包扩展 zip
+        run: |
+          set -e
+          VERSION=$(node -p "require('./manifest.json').version")
+          NAME="naiwa-cet4-v${VERSION}"
+          mkdir -p "dist/${NAME}"
+          # 只把扩展运行必需的文件打进 zip
+          cp manifest.json background.js content.js popup.html popup.js cet4_words.json "dist/${NAME}/"
+          cp -r icons "dist/${NAME}/icons"
+          cd dist
+          zip -r "${NAME}.zip" "${NAME}" -x ".*" -x "*/.*"
+          rm -rf "${NAME}"
+          echo "--- 包内文件 ---"
+          unzip -l "${NAME}.zip"
+          echo "ZIP_PATH=dist/${NAME}.zip" >> $GITHUB_ENV
+          echo "ZIP_NAME=${NAME}.zip" >> $GITHUB_ENV
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: 奶娃过四级 ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ env.ZIP_PATH }}
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            1. 下载下方的 `${{ env.ZIP_NAME }}` 并解压
+            2. 打开 `chrome://extensions/`（Edge 为 `edge://extensions/`）
+            3. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择解压出的文件夹
+            4. 打开视频页并让字幕持续播放
+
+            也可以直接在商店安装（审核通过后）：Chrome 应用商店 / Edge 加载项。

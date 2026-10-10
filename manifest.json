@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "奶娃过四级",
+  "version": "1.2.0",
+  "description": "奶娃陪你过四级：收集视频字幕中的四级词汇（优先读取沉浸式翻译的双语字幕），去重、标注出现时间点、查词形变化，支持「斩」掉熟悉词",
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["cet4_words.json"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "奶娃过四级"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

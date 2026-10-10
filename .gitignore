@@ -1,0 +1,32 @@
+# ---- 构建产物 ----
+dist/
+build/
+*.zip
+*.crx
+*.pem
+*.key
+
+# ---- 依赖 ----
+node_modules/
+package-lock.json
+yarn.lock
+
+# ---- 系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---- 临时文件 ----
+*.log
+*.tmp
+tmp/
+.cache/
+
+# ---- 本地私密内容 ----
+# 个人邮箱、开发者账号信息等，不要提交
+private/
+*.local.md

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>奶娃过四级 · 看视频顺便攒四级词汇</title>
+<meta name="description" content="奶娃过四级：Chrome / Edge 浏览器扩展。自动抓取视频字幕中的四级词汇，标注时间点、查看单词变形、一键斩掉熟悉词。">
+<style>
+  :root{
+    --bg:#fbfaf8;
+    --card:#ffffff;
+    --text:#23201c;
+    --muted:#6b6459;
+    --line:#e8e3da;
+    --accent:#c2572a;
+    --accent-2:#e08a4a;
+    --accent-soft:#fdf1ea;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:0 22px}
+
+  /* ---- Hero ---- */
+  .hero{
+    background:linear-gradient(160deg,#fff6f0 0%,#fdf1ea 55%,#fbfaf8 100%);
+    border-bottom:1px solid var(--line);
+    padding:64px 0 56px;text-align:center;
+  }
+  .hero img.logo{
+    width:96px;height:96px;border-radius:24px;
+    box-shadow:0 10px 28px rgba(194,87,42,.18);
+  }
+  .hero h1{font-size:38px;margin:20px 0 8px;letter-spacing:-.5px}
+  .hero p.tag{font-size:18px;color:var(--muted);margin:0 auto;max-width:560px}
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:12px 24px;border-radius:11px;text-decoration:none;
+    font-weight:600;font-size:15.5px;transition:transform .15s,box-shadow .15s;
+  }
+  .btn:hover{transform:translateY(-2px)}
+  .btn-primary{
+    background:var(--accent);color:#fff;
+    box-shadow:0 6px 18px rgba(194,87,42,.28);
+  }
+  .btn-ghost{background:#fff;color:var(--text);border:1px solid var(--line)}
+  .badge{
+    display:inline-block;margin-bottom:18px;padding:5px 14px;border-radius:999px;
+    background:#fff;border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--accent);
+  }
+
+  /* ---- 通用段 ---- */
+  section{padding:56px 0}
+  h2{font-size:26px;margin:0 0 8px;letter-spacing:-.3px}
+  .lead{color:var(--muted);margin:0 0 30px;font-size:16px}
+
+  /* ---- 功能卡 ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px;transition:border-color .15s,box-shadow .15s;
+  }
+  .card:hover{border-color:#dccfc2;box-shadow:0 6px 20px rgba(0,0,0,.05)}
+  .card .ico{font-size:24px;line-height:1}
+  .card h3{font-size:17px;margin:12px 0 6px}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+
+  /* ---- 截图 ---- */
+  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+  .shot{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    overflow:hidden;
+  }
+  .shot .ph{
+    aspect-ratio:16/10;background:
+      repeating-linear-gradient(45deg,#f6f3ee,#f6f3ee 12px,#f1ede6 12px,#f1ede6 24px);
+    display:flex;align-items:center;justify-content:center;
+    color:#a99f92;font-size:14px;text-align:center;padding:16px;
+  }
+  .shot img{width:100%;display:block}
+  .shot figcaption{padding:12px 16px;font-size:14px;color:var(--muted);border-top:1px solid var(--line)}
+
+  /* ---- 步骤 ---- */
+  ol.steps{padding-left:0;list-style:none;counter-reset:s;margin:0}
+  ol.steps li{
+    counter-increment:s;position:relative;padding:0 0 22px 46px;
+    border-left:2px solid var(--line);margin-left:14px;
+  }
+  ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+  ol.steps li::before{
+    content:counter(s);position:absolute;left:-15px;top:-2px;
+    width:28px;height:28px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:14px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+  }
+  ol.steps strong{display:block;margin-bottom:2px}
+  ol.steps span{color:var(--muted);font-size:14.5px}
+  code{
+    background:#f4f1ec;padding:2px 7px;border-radius:5px;
+    font:13.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all;
+  }
+
+  /* ---- 隐私条 ---- */
+  .privacy{
+    background:#f2f9f4;border:1px solid #d5e9dc;border-radius:14px;
+    padding:26px 28px;
+  }
+  .privacy h2{margin-top:0;color:#2f7d52;font-size:21px}
+  .privacy ul{margin:12px 0 0;padding-left:0;list-style:none}
+  .privacy li{margin:7px 0;color:#3a4a40;font-size:15px}
+
+  footer{
+    border-top:1px solid var(--line);padding:28px 0 46px;text-align:center;
+    color:var(--muted);font-size:13.5px;
+  }
+  footer a{color:var(--accent);text-decoration:none;margin:0 9px}
+  footer a:hover{text-decoration:underline}
+
+  @media (max-width:560px){
+    .hero{padding:44px 0 40px}
+    .hero h1{font-size:28px}
+    .hero p.tag{font-size:16px}
+    h2{font-size:22px}
+    section{padding:40px 0}
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <span class="badge">Chrome / Edge 扩展 · 免费开源</span><br>
+    <img class="logo" src="store-assets/store-logo-300.png" alt="奶娃过四级">
+    <h1>奶娃过四级</h1>
+    <p class="tag">看视频的时候，把四级词汇悄悄攒起来 —— 自动抓取字幕里的 CET-4 单词，标时间点、查变形、一键斩掉熟悉词。</p>
+    <div class="btns">
+      <a class="btn btn-primary" href="#install">📦 安装使用</a>
+      <a class="btn btn-ghost" href="privacy.html">🔒 隐私政策</a>
+    </div>
+  </div>
+</div>
+
+<section class="wrap">
+  <h2>你每天刷的视频，其实藏着大量四级词汇</h2>
+  <p class="lead">可惜看完就忘，一个都没留下。这个扩展帮你把它们捞出来。</p>
+  <div class="grid">
+    <div class="card">
+      <div class="ico">🎯</div>
+      <h3>自动抓词</h3>
+      <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕，没开也能抓 YouTube 原生字幕。</p>
+    </div>
+    <div class="card">
+      <div class="ico">⏱️</div>
+      <h3>标注时间点</h3>
+      <p>每个词都记录它在视频里出现的位置（mm:ss），最多显示前 10 个，方便回看原句。</p>
+    </div>
+    <div class="card">
+      <div class="ico">🗡️</div>
+      <h3>一键「斩」</h3>
+      <p>认识？点一下「斩」，这个词以后就不再出现。越用越清爽，专注那些你还不熟的词。</p>
+    </div>
+    <div class="card">
+      <div class="ico">📖</div>
+      <h3>点词看详情</h3>
+      <p>单词变形（复数 / 过去式 / 过去分词 / 现在分词 / 比较级 / 最高级）本地秒出，各词性释义只留常用的。</p>
+    </div>
+    <div class="card">
+      <div class="ico">🔍</div>
+      <h3>双词典兜底</h3>
+      <p>本地词表 → Free Dictionary API → Wiktionary，遇到 404 也能查到词条。</p>
+    </div>
+    <div class="card">
+      <div class="ico">🌐</div>
+      <h3>不局限于 YouTube</h3>
+      <p>纯只读监听页面字幕元素，不修改页面、不影响翻译扩展、不影响你看视频。</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap" id="shots">
+  <h2>界面预览</h2>
+  <p class="lead">单词列表、点击详情、斩词管理，三张图看懂。</p>
+  <div class="shots">
+    <figure class="shot">
+      <img src="screenshots/01-word-list.png" alt="单词列表" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'screenshots/01-word-list.png'}))">
+      <figcaption>单词列表 · 带时间点与出现次数</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/02-word-detail.png" alt="单词详情" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'screenshots/02-word-detail.png'}))">
+      <figcaption>点击单词 · 原型、变形与各词性释义</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/03-familiar-words.png" alt="已斩词" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'screenshots/03-familiar-words.png'}))">
+      <figcaption>已斩词 · 熟悉的词不再打扰你</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="wrap" id="install">
+  <h2>安装使用</h2>
+  <p class="lead">扩展还在开发者模式下加载（商店审核中），三步搞定。</p>
+  <ol class="steps">
+    <li>
+      <strong>下载源码</strong>
+      <span>在 GitHub 仓库页面点 <code>Code → Download ZIP</code>，解压到任意目录。</span>
+    </li>
+    <li>
+      <strong>打开扩展管理页</strong>
+      <span>Chrome 访问 <code>chrome://extensions/</code>；Edge 访问 <code>edge://extensions/</code>。</span>
+    </li>
+    <li>
+      <strong>开启开发者模式并加载</strong>
+      <span>打开右上角（Edge 为左下角）的「开发者模式」，点「加载已解压的扩展程序」，选择<strong>含 manifest.json 的那一层目录</strong>。</span>
+    </li>
+    <li>
+      <strong>打开视频页</strong>
+      <span>让视频持续播放并显示字幕，点击工具栏里的奶娃图标，单词就会跟着字幕一句句累积。</span>
+    </li>
+  </ol>
+</section>
+
+<section class="wrap">
+  <div class="privacy">
+    <h2>🔒 隐私优先</h2>
+    <ul>
+      <li>✅ 字幕文本<strong>只在你的浏览器本地处理</strong>，不上传（我们根本没有服务器）</li>
+      <li>✅ 只有你<strong>主动点击</strong>单词时，才把<strong>那个单词本身</strong>发给公开词典接口</li>
+      <li>✅ 「已斩词」和收集记录保存在浏览器本地，不离开你的设备</li>
+      <li>✅ 无需登录、无广告、无追踪、无统计分析</li>
+    </ul>
+    <p style="margin:18px 0 0"><a href="privacy.html" style="color:#2f7d52;font-weight:600">查看完整隐私政策 →</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/">GitHub 仓库</a> ·
+      <a href="privacy.html">隐私政策</a> ·
+      <a href="使用说明.md">使用说明</a>
+    </p>
+    <p>© 2026 奶娃过四级 · MIT License · 与 YouTube、Microsoft、沉浸式翻译等第三方无任何关联</p>
+  </div>
+</footer>
+
+</body>
+</html>

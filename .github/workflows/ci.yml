@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: 校验扩展文件
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 校验 manifest.json 与词表 JSON 格式
+        run: |
+          node -e "
+          const fs = require('fs');
+          const fail = (m) => { console.error('❌ ' + m); process.exit(1); };
+
+          // ---- manifest.json ----
+          const m = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          if (m.manifest_version !== 3) fail('manifest_version 必须为 3');
+          for (const k of ['name','version','description','background','action','icons']) {
+            if (!m[k]) fail('manifest.json 缺少字段: ' + k);
+          }
+          const v = m.version.split('.').map(Number);
+          if (v.length !== 3 || v.some(isNaN)) fail('version 必须是 x.y.z 格式，当前: ' + m.version);
+          console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
+
+          // ---- 扩展必需文件 ----
+          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json'];
+          for (const f of required) {
+            if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
+          }
+          console.log('✅ 必需文件齐全: ' + required.join(', '));
+
+          // ---- 图标 ----
+          for (const [size, p] of Object.entries(m.icons)) {
+            if (!fs.existsSync(p)) fail('缺少图标 ' + size + ': ' + p);
+          }
+          console.log('✅ 图标齐全: ' + Object.values(m.icons).join(', '));
+
+          // ---- 词表 ----
+          const w = JSON.parse(fs.readFileSync('cet4_words.json', 'utf8'));
+          const n = Object.keys(w).length;
+          if (n < 1000) fail('词表条目过少，可能文件损坏: ' + n);
+          console.log('✅ cet4_words.json 合法  共 ' + n + ' 个词条');
+
+          // ---- background.js 语法检查 ----
+          new (require('vm').Script)(fs.readFileSync('background.js','utf8'));
+          console.log('✅ background.js 语法正确');
+          new (require('vm').Script)(fs.readFileSync('content.js','utf8'));
+          console.log('✅ content.js 语法正确');
+          new (require('vm').Script)(fs.readFileSync('popup.js','utf8'));
+          console.log('✅ popup.js 语法正确');
+
+          console.log('');
+          console.log('🎉 全部检查通过');
+          "
