@@ -89,6 +89,7 @@
 <main class="wrap">
 <h1>奶娃过四级 · 安装 &amp; 使用说明</h1>
 <p>一个 Chrome/Edge 扩展，抓取视频字幕里的<strong>四级词汇</strong>（优先读取「沉浸式翻译」的双语字幕），去重、标注出现时间点，还能像百词斩一样「斩」掉熟悉词。</p>
+<blockquote><strong>⚠️ 必读：一定要打开「沉浸式翻译」的双语字幕。</strong> 本扩展抓的词，就是从「沉浸式翻译」渲染出的双语字幕里取的（只取英文原文那一行）。 不开的话，除了 YouTube 自带字幕，<strong>Netflix / B站 这类平台基本抓不到词</strong> —— 想省事就一直开着。 「沉浸式翻译」是另一个免费扩展（应用商店搜 <code>Immersive Translate</code>），它把字幕显示成"英文一行、中文一行"。</blockquote>
 <hr>
 <h2>一、安装（3 步）</h2>
 <p><strong>Chrome</strong>：地址栏输入 <code>chrome://extensions/</code> 回车</p>
@@ -103,7 +104,7 @@
 <hr>
 <h2>二、怎么用</h2>
 <ol>
-<li>打开任意一个<strong>有字幕</strong>的视频（YouTube / Netflix / B站等，配合「沉浸式翻译」最好）</li>
+<li>打开任意一个<strong>有字幕</strong>的视频（YouTube / Netflix / B站等），并<strong>打开「沉浸式翻译」的双语字幕</strong> —— 画面上要能看到英文一行、中文一行</li>
 <li>让视频播放，双语字幕一句句出现时，本扩展会<strong>边看边自动累积</strong>单词</li>
 <li>点工具栏的 📚 图标查看已收集的四级词汇，每个词后面跟着它在视频里出现的<strong>时间点</strong>（mm:ss，最多显示前 10 个）</li>
 <li>看到熟悉的词，点右边的 <strong>「斩」</strong> → 以后不再显示</li>
@@ -121,8 +122,8 @@
 <hr>
 <h2>四、几个要点（务必看）</h2>
 <ol>
-<li><strong>优先读沉浸式翻译</strong>：本扩展默认监听沉浸式翻译的双语字幕（<code>#immersive-translate-caption-window</code>），只取其中的<strong>英文原文</strong>行，完全<strong>只读、不修改</strong>它的 DOM，不会影响沉浸式翻译的正常显示，也不会影响你看视频。</li>
-<li><strong>没开沉浸式翻译也能用</strong>：会自动退回抓 YouTube 原生字幕轨。但非 YouTube 平台（Netflix/B站）必须靠沉浸式翻译。</li>
+<li><strong>一定要开沉浸式翻译的双语字幕</strong>：本扩展默认监听沉浸式翻译的双语字幕（<code>#immersive-translate-caption-window</code>），只取其中的<strong>英文原文</strong>行。它是<strong>唯一稳定的抓词通道，建议一直开着</strong>。全程只读、不修改它的 DOM，不会影响沉浸式翻译的正常显示，也不会影响你看视频。</li>
+<li><strong>没开沉浸式翻译会怎样</strong>：会自动退回抓 YouTube 原生字幕轨，所以 <strong>YouTube 上勉强能用</strong>；但 <strong>Netflix / B站 等平台没有原生英文字幕可抓，不开就一定抓不到词</strong>。</li>
 <li><strong>实时累积，不是一次性全量</strong>：沉浸式翻译只渲染"当前这一句"字幕，所以单词是边看边收集的。想收集完整个视频的词，就得把视频看完（或快进）。</li>
 <li><strong>斩词是全局的</strong>：斩掉一个词，以后所有视频里它都不再显示。想恢复去「已斩词」标签页点 ✕。</li>
 <li><strong>时间点最多 10 个</strong>：每个词只保留前 10 个出现时间点。</li>
@@ -134,7 +135,7 @@
 <ol>
 <li><strong>扩展刷新过没</strong>：改完代码必须去 <code>chrome://extensions/</code> 点扩展的<strong>刷新</strong>按钮。</li>
 <li><strong>页面刷新过没</strong>：content script 是页面加载时注入的——改了扩展代码后，<strong>正在看的视频页要 F5 刷新一次</strong>，不然跑的还是旧脚本（新装扩展同理：先装再开页面，或者开了页面后刷新）。</li>
-<li><strong>沉浸式翻译开了没</strong>：视频上必须能看到英文+中文双语字幕。</li>
+<li><strong>沉浸式翻译的双语字幕开了没</strong> —— <strong>这是最常见的原因</strong>：视频上必须能看到<strong>英文 + 中文两行</strong>字幕。只开了沉浸式翻译但字幕没显示出来，一样抓不到。</li>
 <li><strong>视频播了没</strong>：沉浸式翻译只实时渲染"当前这一句"，<strong>单词是跟着播放一句句累积的</strong>。只打开不播、或播几秒就停，popup 里自然没东西。播 30 秒再点图标。</li>
 <li>popup 会直接告诉你卡在哪一步：<ul>
 <li><strong>「脚本没在这个页面跑起来」</strong> → 就是第 2 步，刷新页面</li>

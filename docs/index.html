@@ -58,6 +58,14 @@
   h2{font-size:26px;margin:0 0 8px;letter-spacing:-.3px}
   .lead{color:var(--muted);margin:0 0 30px;font-size:16px}
 
+  /* ---- 必读提示 ---- */
+  .must{
+    background:var(--accent-soft);border:1px solid #f2dccd;border-radius:12px;
+    padding:16px 20px;margin:0 0 28px;font-size:15px;color:#5c4b3e;line-height:1.72;
+  }
+  .must b{display:block;color:var(--accent);font-size:15.5px;margin-bottom:6px}
+  .must strong{color:var(--text)}
+
   /* ---- 功能卡 ---- */
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px}
   .card{
@@ -206,7 +214,14 @@
 
 <section class="wrap" id="install">
   <h2>安装使用</h2>
-  <p class="lead">扩展还在开发者模式下加载（商店审核中），三步搞定。</p>
+  <p class="lead">扩展还在开发者模式下加载（商店审核中），跟着下面做，五分钟搞定。</p>
+
+  <div class="must">
+    <b>必读：一定要打开「沉浸式翻译」的双语字幕</b>
+    本扩展抓的词，就是从「沉浸式翻译」渲染出的<strong>双语字幕</strong>里取的（只取英文原文那一行）。
+    不开的话，除了 YouTube 自带字幕，<strong>Netflix / B站 这类平台基本抓不到词</strong> —— 想省事就一直开着。
+  </div>
+
   <ol class="steps">
     <li>
       <strong>下载源码</strong>
@@ -221,8 +236,12 @@
       <span>打开右上角（Edge 为左下角）的「开发者模式」，点「加载已解压的扩展程序」，选择<strong>含 manifest.json 的那一层目录</strong>。</span>
     </li>
     <li>
-      <strong>打开视频页</strong>
-      <span>让视频持续播放并显示字幕，点击工具栏里的奶娃图标，单词就会跟着字幕一句句累积。</span>
+      <strong>打开「沉浸式翻译」的双语字幕</strong>
+      <span>在视频页打开沉浸式翻译（应用商店搜 <code>Immersive Translate</code>，免费），让画面上出现<strong>英文 + 中文两行字幕</strong>。这步别跳过 —— 它决定了能不能抓到词。</span>
+    </li>
+    <li>
+      <strong>让视频播起来，再看弹窗</strong>
+      <span>单词是<strong>跟着播放进度一句句累积</strong>的，只打开不播不会有东西。播 30 秒左右，点工具栏里的奶娃图标，词就出来了。</span>
     </li>
   </ol>
 </section>
