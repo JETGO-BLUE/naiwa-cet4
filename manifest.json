@@ -3,6 +3,7 @@
   "name": "奶娃过四级",
   "version": "1.2.0",
   "description": "从视频字幕收集四级、六级和雅思学习词汇，单选词库、显示全部命中标签、去重和标注时间点，支持查词形及「斩」掉熟悉词",
+  "minimum_chrome_version": "111",
   "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "http://*/*",
@@ -12,6 +13,12 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://youtube.com/*", "https://*.youtube.com/*"],
+      "js": ["youtube-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],

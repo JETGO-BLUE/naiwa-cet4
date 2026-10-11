@@ -3,6 +3,17 @@
 'use strict';
 
 let currentRecord = null;
+let activePageRecordId = null;
+let currentRecordId = null;
+let currentSessionId = null;
+let activeTabId = null;
+let currentVersion = 0;
+let persistedVersion = 0;
+let lastStatusSequence = 0;
+let captureState = null;
+let perfSummary = null;
+let historyRequest = 0;
+let initRequest = 0;
 let familiarWords = [];
 let familiarEntries = [];
 let selectedVocabulary = 'cet4';
@@ -40,11 +51,12 @@ function sendToContent(msg) {
   });
 }
 
-// 初始化：优先问当前标签页的 content 有没有已累积的内容，否则读历史存储
+// 初始化当前标签页身份后只查询记录，不再把页面累计字幕重新提交给后台。
 let lastStatus = null;
 let contentAlive = null; // null=未知, true=content 响应了, false=没注入
 let contentDebug = null; // content 返回的诊断信息
 async function init() {
+  const requestId = ++initRequest;
   const picker = document.getElementById('vocabularySelect');
   picker.disabled = true;
   const settings = await send({ type: 'GET_VOCABULARY' });
@@ -67,53 +79,43 @@ async function init() {
     return;
   }
   updateFamiliar(familiar);
-  // 1) 先问当前标签页 content script（实时累积，不用等存储）
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  activeTabId = tabs && tabs[0] ? tabs[0].id : null;
   const cs = await sendToContent({ type: 'GET_STATE' });
+  if (requestId !== initRequest) return;
   contentAlive = !!(cs && cs.ok);
   contentDebug = cs && cs.state ? cs.state.debug || null : null;
-  if (cs && cs.ok && cs.state && cs.state.cues && cs.state.cues.length > 0) {
-    // content 有内容，交给 background 处理成单词表并返回记录
-    const rec = await send({
-      type: 'CAPTIONS',
-      videoId: cs.state.videoId,
-      title: cs.state.title,
-      language: 'en',
-      cues: cs.state.cues,
-      source: 'immersive-translate',
-    });
-    if (rec && rec.ok && rec.record) {
-      currentRecord = rec.record;
+  currentRecord = null;
+  currentRecordId = null;
+  currentVersion = 0;
+  persistedVersion = 0;
+  if (cs && cs.ok && cs.state && cs.state.recordId) {
+    activePageRecordId = cs.state.recordId;
+    currentRecordId = cs.state.recordId;
+    currentSessionId = cs.state.sessionId || null;
+    lastStatusSequence = Number(cs.state.statusSequence) || 0;
+    captureState = cs.state;
+    const record = await send({ type: 'GET_VIDEO', recordId: currentRecordId });
+    if (requestId !== initRequest) return;
+    if (record && record.ok) {
+      currentRecord = record.record;
+      currentVersion = record.version || (record.record && record.record.version) || 0;
+      persistedVersion = record.persistedVersion || currentVersion;
+      updateFamiliar(record);
       lastStatus = null;
-      render();
-      return;
+    } else {
+      lastStatus = { type: 'error', error: record.error || '读取当前视频失败' };
     }
-    if (!rec.ok) {
-      uiError = rec.error;
-      lastStatus = { type: 'error', error: rec.error };
-      render();
-      return;
-    }
+  } else {
+    // 没有当前页面身份时显示连接状态，不把上一视频记录伪装成当前视频。
+    activePageRecordId = null;
+    currentSessionId = null;
+    captureState = null;
+    lastStatus = { type: 'disconnected' };
   }
-
-  // 2) 否则读最近一次视频的存储记录
-  const resp = await send({ type: 'GET_LAST_VIDEO' });
-  if (resp && resp.ok && resp.record) {
-    currentRecord = resp.record;
-    updateFamiliar(resp);
-    lastStatus = null;
-    render();
-    return;
-  }
-  if (!resp.ok) {
-    uiError = resp.error;
-    lastStatus = { type: 'error', error: resp.error };
-    render();
-    return;
-  }
-
-  // 3) 没有视频记录，查状态（无字幕/错误）
-  const st = await send({ type: 'GET_STATUS' });
-  lastStatus = st.ok ? st.status : { type: 'error', error: st.error };
+  const perf = await send({ type: 'GET_PERF' });
+  if (requestId !== initRequest) return;
+  perfSummary = perf && perf.ok ? perf.summary : null;
   render();
 }
 
@@ -145,12 +147,66 @@ function renderVocabularyStatus() {
   status.classList.toggle('error', !!uiError);
 }
 
+function renderCaptureStatus() {
+  const element = document.getElementById('captureStatus');
+  if (!element) return;
+  const status = captureState && captureState.status;
+  const labels = {
+    connecting: '正在连接字幕来源',
+    waiting: '等待可读取的英文字幕',
+    collecting: '正在收集并保存字幕',
+    saved: '本地记录已保存',
+    no_captions: '没有可读取的英文字幕',
+    error: '字幕来源连接失败',
+    save_failed: '本地保存失败，输入仍在页面缓存中',
+  };
+  let message = status ? labels[status] || status : (contentAlive === false ? '扩展脚本未连接' : '等待字幕状态');
+  if (captureState && captureState.detail) message += ' · ' + captureState.detail;
+  if (currentRecord && currentRecord.identityConfirmed === false) message += ' · 视频身份未确认';
+  if (currentVersion > persistedVersion) message += ' · 保存队列中';
+  const uiMetric = perfSummary && perfSummary.captureToPopup;
+  if (uiMetric && uiMetric.p95 != null) {
+    message += ` · 弹窗更新回调 P95 ${Math.round(uiMetric.p95)} ms（${uiMetric.sampleCount} 次）`;
+  }
+  element.textContent = message;
+  element.classList.toggle('error', status === 'error' || status === 'save_failed');
+}
+
+function renderPerformanceMetrics() {
+  const container = document.getElementById('perfMetrics');
+  if (!container) return;
+  if (!perfSummary) {
+    container.textContent = '暂无计时样本';
+    return;
+  }
+  const format = (metric) => metric && metric.sampleCount
+    ? `P50 ${Number(metric.p50).toFixed(1)} ms · P95 ${Number(metric.p95).toFixed(1)} ms · n=${metric.sampleCount}`
+    : '暂无样本';
+  const rows = [
+    ['字幕回调 → 后台收到', perfSummary.captureToBackground],
+    ['后台匹配与展示过滤', perfSummary.match],
+    ['普通单句匹配', perfSummary.normalIncrementalMatch],
+    ['YouTube 整轨匹配', perfSummary.youtubeNativeMatch],
+    ['本地存储写入', perfSummary.save],
+    ['字幕回调 → 本地保存', perfSummary.captureToSave],
+    ['字幕回调 → 弹窗绘制回调', perfSummary.captureToPopup],
+    ['本地历史记录恢复', perfSummary.recordRestore],
+    ['YouTube 整轨网络请求', perfSummary.youtubeCaptionFetch],
+  ];
+  const cold = perfSummary.vocabularyColdStartMs == null ? '尚未加载' : `${Number(perfSummary.vocabularyColdStartMs).toFixed(1)} ms`;
+  container.innerHTML = rows.map(([label, metric]) => `<div>${escapeHtml(label)}：${escapeHtml(format(metric))}</div>`).join('') +
+    `<div>三份词库冷加载：${escapeHtml(cold)}</div>` +
+    '<div class="muted">按回调采集起点计时；弹窗项到 requestAnimationFrame 回调，不等于完整物理绘制。浏览器时间精度有限；后台重启后样本会清空。</div>';
+}
+
 // 渲染当前 tab
 function render() {
   renderVocabularyStatus();
   const titleEl = document.getElementById('videoTitle');
   if (currentRecord) {
-    titleEl.textContent = currentRecord.title || '(无标题)';
+    titleEl.textContent = (currentRecord.title || '(无标题)') + (currentRecord.identityConfirmed === false ? ' · 视频身份未确认' : '');
+  } else if (captureState && captureState.title) {
+    titleEl.textContent = captureState.title + (captureState.identityConfirmed === false ? ' · 视频身份未确认' : '');
   } else if (lastStatus && lastStatus.type === 'no_captions') {
     titleEl.textContent = (lastStatus.title || '视频') + ' — 无字幕';
   } else if (lastStatus && lastStatus.type === 'error') {
@@ -158,6 +214,8 @@ function render() {
   } else {
     titleEl.textContent = '尚未捕获视频';
   }
+  renderCaptureStatus();
+  renderPerformanceMetrics();
   renderCurrent();
   renderFamiliar();
   if (currentTab === 'history') renderHistory();
@@ -179,6 +237,30 @@ function renderDebug() {
   );
 }
 
+function renderWordCard(w, slashedSet) {
+  const isSlashed = slashedSet.has(w.word);
+  const timesHtml = (w.times || []).slice(0, 10)
+    .map((t) => `<span class="time-tag">${escapeHtml(t)}</span>`)
+    .join('');
+  const lemmaHint = w.lemma && w.lemma !== w.word
+    ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
+    : '';
+  return `
+    <div class="word-card ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
+      <div class="word-head">
+        <div class="word-left word-clickable" data-word="${escapeHtml(w.word)}">
+          <div class="word-text">${escapeHtml(w.word)}${lemmaHint}</div>
+          ${vocabularyTags(w.categories)}
+          <div class="word-meaning">${escapeHtml(w.meaning || '点击单词联网查释义')}</div>
+        </div>
+        <button class="slash-btn ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
+          ${isSlashed ? '已斩 ✓' : '斩'}
+        </button>
+      </div>
+      <div class="times">${timesHtml}</div>
+    </div>`;
+}
+
 // 渲染当前视频单词列表
 function renderCurrent() {
   const container = document.getElementById('currentContent');
@@ -196,16 +278,20 @@ function renderCurrent() {
         escapeHtml(lastStatus.error || '') + '</div>';
       return;
     }
+    if (lastStatus && lastStatus.type === 'disconnected') {
+      container.innerHTML = '<div class="empty"><div class="icon">🔌</div><b>当前页面没有连接字幕采集</b><br/>' +
+        '打开视频页后刷新页面，再让字幕出现。已有视频记录可在「历史记录」中查看。</div>';
+      return;
+    }
     container.innerHTML =
       (contentAlive === false
         ? '<div class="empty"><div class="icon">🔌</div><b>扩展脚本没在这个页面跑起来</b><br/>' +
           '请先<b>刷新当前视频页面</b>（F5），再打开沉浸式翻译双语字幕，' +
-          '让视频播放几秒后再点本图标。' +
+          '或启用可读取的英文字幕轨。' +
           '<br/><br/>（改完代码后，扩展和页面都要刷新一次）</div>'
         : contentAlive === true
-        ? '<div class="empty"><div class="icon">🎬</div><b>脚本已注入，但还没收到字幕</b><br/>' +
-          '确认沉浸式翻译的双语字幕（英文+中文）已经显示在视频上，' +
-          '并让视频<b>持续播放</b>——单词是跟着字幕一句句累积的。' +
+        ? '<div class="empty"><div class="icon">🎬</div><b>脚本已连接，等待可读取的英文字幕</b><br/>' +
+          '可以显示沉浸式翻译的英文原文，或启用网站提供的英文字幕轨。' +
           renderDebug() +
           '</div>'
         : '<div class="empty"><div class="icon">🎬</div>打开一个视频<br/>（需有字幕）后回到这里查看</div>');
@@ -249,51 +335,133 @@ function renderCurrent() {
     return;
   }
 
-  let cardsHtml = '';
-  for (const w of shown) {
-    const isSlashed = slashedSet.has(w.word);
-    const timesHtml = (w.times || []).slice(0, 10)
-      .map((t) => `<span class="time-tag">${escapeHtml(t)}</span>`)
-      .join('');
-    const lemmaHint = w.lemma && w.lemma !== w.word
-      ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
-      : '';
-    cardsHtml += `
-      <div class="word-card ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
-        <div class="word-head">
-          <div class="word-left word-clickable" data-word="${escapeHtml(w.word)}">
-            <div class="word-text">${escapeHtml(w.word)}${lemmaHint}</div>
-            ${vocabularyTags(w.categories)}
-            <div class="word-meaning">${escapeHtml(w.meaning || '点击单词联网查释义')}</div>
-          </div>
-          <button class="slash-btn ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
-            ${isSlashed ? '已斩 ✓' : '斩'}
-          </button>
-        </div>
-        <div class="times">${timesHtml}</div>
-      </div>`;
+  const cardsHtml = shown.map((word) => renderWordCard(word, slashedSet)).join('');
+  container.innerHTML = statsHtml + cardsHtml;
+}
+
+function refreshStatsOnly(container) {
+  const stats = container.querySelector('.stats');
+  if (!stats || !currentRecord) return false;
+  const words = selectedWords(currentRecord.words);
+  const slashedSet = new Set(familiarWords);
+  const active = words.filter((word) => !slashedSet.has(word.word)).length;
+  const slashed = words.length - active;
+  const html = `<div class="stats">
+    <div class="stat"><b>${words.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
+    <div class="stat"><b>${active}</b>待记</div>
+    <div class="stat"><b>${slashed}</b>已斩</div>
+  </div>`;
+  stats.outerHTML = html;
+  return true;
+}
+
+function applyRecordDelta(message) {
+  if (message.recordId !== currentRecordId || Number(message.version) <= currentVersion) return;
+  const container = document.getElementById('currentContent');
+  const scrollTop = container.scrollTop;
+  if (!currentRecord) {
+    currentRecord = {
+      videoId: message.recordId,
+      recordId: message.recordId,
+      title: message.title || '',
+      identityConfirmed: message.identityConfirmed !== false,
+      words: [],
+      totalWords: 0,
+      capturedAt: Date.now(),
+      version: 0,
+      vocabularyVersion: 1,
+    };
+  }
+  const wordsBySurface = new Map((currentRecord.words || []).map((word) => [String(word.word || '').toLowerCase(), word]));
+  for (const word of message.changedWords || []) {
+    wordsBySurface.set(String(word.word || '').toLowerCase(), word);
+  }
+  currentRecord.words = Array.from(wordsBySurface.values());
+  currentRecord.totalWords = Number(message.totalWords) || currentRecord.words.length;
+  currentRecord.title = message.title || currentRecord.title;
+  currentRecord.identityConfirmed = message.identityConfirmed !== false;
+  currentRecord.version = Number(message.version) || currentVersion;
+  currentVersion = Number(message.version) || currentVersion;
+  persistedVersion = Number(message.persistedVersion) || persistedVersion;
+  captureState = {
+    ...(captureState || {}),
+    recordId: message.recordId,
+    title: currentRecord.title,
+    identityConfirmed: currentRecord.identityConfirmed,
+    status: 'collecting',
+    detail: message.hadNewMatches ? '字幕已读取，已发现新的命中词。' : '字幕已读取，但这一批没有新增命中词。',
+  };
+  document.getElementById('videoTitle').textContent = currentRecord.title || '(无标题)';
+  if (!currentRecord.identityConfirmed) document.getElementById('videoTitle').textContent += ' · 视频身份未确认';
+  renderCaptureStatus();
+
+  if (currentTab === 'current') {
+    if (searchKeyword.trim() || !container.querySelector('.stats')) {
+      renderCurrent();
+    } else {
+      let needsFullRender = false;
+      const slashedSet = new Set(familiarWords);
+      for (const word of message.changedWords || []) {
+        const matchesSelected = (word.categories || []).includes(selectedVocabulary);
+        const query = searchKeyword.trim().toLowerCase();
+        const matchesQuery = !query || word.word.toLowerCase().includes(query) || (word.meaning || '').toLowerCase().includes(query);
+        const existing = Array.from(container.querySelectorAll('.word-card')).find((card) => card.getAttribute('data-word') === word.word);
+        if (!matchesSelected || !matchesQuery) {
+          if (existing) existing.remove();
+          continue;
+        }
+        const markup = renderWordCard(word, slashedSet);
+        if (existing) existing.outerHTML = markup;
+        else {
+          const insertionPoint = container.querySelector('.empty');
+          if (insertionPoint) needsFullRender = true;
+          else container.insertAdjacentHTML('beforeend', markup);
+        }
+      }
+      if (needsFullRender || !refreshStatsOnly(container)) renderCurrent();
+    }
+    container.scrollTop = scrollTop;
+  } else if (currentTab === 'history') {
+    renderHistory();
   }
 
-  container.innerHTML = statsHtml + cardsHtml;
-
-  // 点击单词（非斩词按钮）→ 弹出详情
-  container.querySelectorAll('.word-clickable').forEach((el) => {
-    el.addEventListener('click', async (e) => {
-      const word = el.getAttribute('data-word');
-      openDetail(word);
+  if (message.capturedAtEpoch) {
+    requestAnimationFrame(() => {
+      const captureToPopupMs = performance.timeOrigin + performance.now() - Number(message.capturedAtEpoch);
+      if (Number.isFinite(captureToPopupMs) && captureToPopupMs >= 0) {
+        void (async () => {
+          await send({ type: 'PERF_SAMPLE', captureToPopupMs });
+          const response = await send({ type: 'GET_PERF' });
+          if (response && response.ok && message.recordId === currentRecordId) {
+            perfSummary = response.summary;
+            renderCaptureStatus();
+            renderPerformanceMetrics();
+          }
+        })();
+      }
     });
-  });
+  }
+}
 
-  // 绑定斩词按钮
-  container.querySelectorAll('.slash-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const word = btn.getAttribute('data-word');
-      const resp = await send({ type: familiarWords.includes(word) ? 'UNSLASH_WORD' : 'SLASH_WORD', word: word });
-      updateFamiliar(resp);
-      render();
-    });
-  });
+async function loadActivePageRecord() {
+  const targetId = activePageRecordId;
+  if (!targetId) {
+    currentRecordId = null;
+    currentRecord = null;
+    currentVersion = 0;
+    persistedVersion = 0;
+    render();
+    return;
+  }
+  const response = await send({ type: 'GET_VIDEO', recordId: targetId });
+  if (currentTab !== 'current' || activePageRecordId !== targetId) return;
+  currentRecordId = targetId;
+  currentRecord = response && response.ok ? response.record : null;
+  currentVersion = response && response.ok ? Number(response.version) || 0 : 0;
+  persistedVersion = response && response.ok ? Number(response.persistedVersion) || currentVersion : 0;
+  if (response && response.ok) updateFamiliar(response);
+  else lastStatus = { type: 'error', error: response && response.error || '读取当前视频失败' };
+  render();
 }
 
 // 渲染已斩词列表
@@ -323,8 +491,11 @@ function renderFamiliar() {
 
 // 渲染历史记录
 async function renderHistory() {
+  const requestId = ++historyRequest;
   const container = document.getElementById('historyContent');
+  const oldScrollTop = container.scrollTop;
   const resp = await send({ type: 'GET_ALL_VIDEOS' });
+  if (requestId !== historyRequest || currentTab !== 'history') return;
   if (!resp.ok) {
     container.innerHTML = '<div class="empty">' + escapeHtml(resp.error) + '</div>';
     return;
@@ -345,6 +516,7 @@ async function renderHistory() {
       </div>`;
   }
   container.innerHTML = html;
+  container.scrollTop = oldScrollTop;
 
   container.querySelectorAll('.video-item').forEach((el) => {
     el.addEventListener('click', async () => {
@@ -352,8 +524,11 @@ async function renderHistory() {
       const r = await send({ type: 'GET_VIDEO', videoId: videoId });
       if (r.ok && r.record) {
         currentRecord = r.record;
+        currentRecordId = videoId;
+        currentVersion = Number(r.version) || Number(r.record.version) || 0;
+        persistedVersion = Number(r.persistedVersion) || currentVersion;
         updateFamiliar(r);
-        switchTab('current');
+        switchTab('current', true);
         render();
       } else if (!r.ok) {
         uiError = r.error;
@@ -364,7 +539,7 @@ async function renderHistory() {
 }
 
 // tab 切换
-function switchTab(tab) {
+function switchTab(tab, preserveViewedRecord) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((t) => {
     t.classList.toggle('active', t.getAttribute('data-tab') === tab);
@@ -374,6 +549,7 @@ function switchTab(tab) {
   document.getElementById('tab-familiar').style.display = tab === 'familiar' ? '' : 'none';
 
   if (tab === 'history') renderHistory();
+  if (tab === 'current' && !preserveViewedRecord && currentRecordId !== activePageRecordId) void loadActivePageRecord();
 }
 
 function escapeHtml(s) {
@@ -383,6 +559,99 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+document.getElementById('currentContent').addEventListener('click', async (event) => {
+  const slashButton = event.target.closest('.slash-btn');
+  if (slashButton) {
+    event.stopPropagation();
+    const word = slashButton.getAttribute('data-word');
+    const response = await send({ type: familiarWords.includes(word) ? 'UNSLASH_WORD' : 'SLASH_WORD', word });
+    updateFamiliar(response);
+    const scrollTop = document.getElementById('currentContent').scrollTop;
+    renderCurrent();
+    document.getElementById('currentContent').scrollTop = scrollTop;
+    renderFamiliar();
+    return;
+  }
+  const wordCard = event.target.closest('.word-clickable');
+  if (wordCard) openDetail(wordCard.getAttribute('data-word'));
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (!message || !message.type) return;
+  if (message.type === 'RECORD_UPDATED') {
+    const identityIsUnconfirmed = currentRecord && currentRecord.identityConfirmed === false ||
+      captureState && captureState.recordId === currentRecordId && captureState.identityConfirmed === false;
+    if (message.recordId === currentRecordId && (!identityIsUnconfirmed || message.sessionId === currentSessionId)) applyRecordDelta(message);
+    else if (currentTab === 'history') renderHistory();
+    return;
+  }
+  if (message.type === 'CAPTURE_STATUS') {
+    void acceptCaptureStatus(message);
+    return;
+  }
+  if (message.type === 'RECORD_PERSISTED' && message.recordId === currentRecordId) {
+    persistedVersion = Math.max(persistedVersion, Number(message.persistedVersion) || 0);
+    if (captureState && currentVersion <= persistedVersion) {
+      captureState.status = 'saved';
+      captureState.detail = '字幕已写入本地记录。';
+    }
+    renderCaptureStatus();
+    void send({ type: 'GET_PERF' }).then((response) => {
+      if (response && response.ok) {
+        perfSummary = response.summary;
+        renderCaptureStatus();
+        renderPerformanceMetrics();
+      }
+    });
+    return;
+  }
+  if ((message.type === 'RECORD_SAVE_FAILED' || message.type === 'RECORD_SAVE_PAUSED') && message.recordId === currentRecordId) {
+    captureState = { ...(captureState || {}), status: 'save_failed', detail: message.error || '本地保存失败。' };
+    renderCaptureStatus();
+  }
+});
+
+async function acceptCaptureStatus(message) {
+  if (message.tabId !== activeTabId) return;
+  let state = message;
+  if (currentSessionId && message.sessionId && message.sessionId !== currentSessionId) {
+    const response = await sendToContent({ type: 'GET_STATE' });
+    if (!response || !response.ok || !response.state || response.state.sessionId !== message.sessionId) return;
+    state = response.state;
+  }
+  const sequence = Number(state.statusSequence) || 0;
+  if (state.sessionId === currentSessionId && sequence && sequence <= lastStatusSequence) return;
+  const previousPageId = activePageRecordId;
+  activePageRecordId = state.recordId || state.videoId || activePageRecordId;
+  currentSessionId = state.sessionId || currentSessionId;
+  lastStatusSequence = sequence || lastStatusSequence;
+  captureState = {
+    ...(captureState || {}),
+    recordId: activePageRecordId,
+    sessionId: currentSessionId,
+    statusSequence: lastStatusSequence,
+    status: state.status || state.captureStatus || 'waiting',
+    detail: state.detail || state.statusDetail || '',
+    title: state.title || '',
+    identityConfirmed: state.identityConfirmed !== false,
+    debug: state.debug || captureState && captureState.debug,
+  };
+  if (currentTab === 'current' && currentRecordId === previousPageId && activePageRecordId !== previousPageId) {
+    currentRecordId = activePageRecordId;
+    currentRecord = null;
+    currentVersion = 0;
+    persistedVersion = 0;
+    void loadActivePageRecord();
+  } else {
+    if (currentTab === 'current' && currentRecordId === activePageRecordId && !currentRecord) {
+      void loadActivePageRecord();
+    } else {
+      renderCaptureStatus();
+      if (currentTab === 'current' && !currentRecord) renderCurrent();
+    }
+  }
 }
 
 // 事件绑定
@@ -411,15 +680,34 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
 });
 
 document.getElementById('recaptureBtn').addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && tab.id) {
-    chrome.tabs.sendMessage(tab.id, { type: 'RECAPTURE' }, () => {
-      void chrome.runtime.lastError; // content script 可能未加载
-    });
+  const button = document.getElementById('recaptureBtn');
+  button.disabled = true;
+  button.textContent = '正在连接…';
+  const response = await sendToContent({ type: 'RECAPTURE' });
+  if (response && response.ok && response.state) {
+    const state = response.state;
+    const oldPageRecordId = activePageRecordId;
+    activePageRecordId = state.recordId;
+    currentSessionId = state.sessionId;
+    lastStatusSequence = Number(state.statusSequence) || lastStatusSequence;
+    captureState = state;
+    contentAlive = true;
+    contentDebug = state.debug || null;
+    if (currentTab === 'current' && currentRecordId === oldPageRecordId && currentRecordId !== activePageRecordId) {
+      currentRecordId = activePageRecordId;
+      currentRecord = null;
+      currentVersion = 0;
+      persistedVersion = 0;
+      await loadActivePageRecord();
+    } else {
+      renderCaptureStatus();
+    }
+  } else {
+    captureState = { ...(captureState || {}), status: 'error', detail: '当前页面未响应重新抓取，请刷新视频页面。' };
+    renderCaptureStatus();
   }
-  setTimeout(async () => {
-    await init();
-  }, 1500);
+  button.disabled = false;
+  button.textContent = '重新抓取';
 });
 
 document.getElementById('clearFamiliarBtn').addEventListener('click', async () => {

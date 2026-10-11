@@ -151,7 +151,7 @@
     <div class="card">
       <div class="ico">🎯</div>
       <h3>自动抓词</h3>
-      <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕，没开也能抓 YouTube 原生字幕。</p>
+      <p>播放时增量读取可见英文字幕和标准字幕轨；YouTube 还可请求原生字幕整轨，可能提前包含未播放内容。</p>
     </div>
     <div class="card">
       <div class="ico">⏱️</div>
@@ -176,7 +176,7 @@
     <div class="card">
       <div class="ico">🌐</div>
       <h3>不局限于 YouTube</h3>
-      <p>纯只读监听页面字幕元素，不修改页面、不影响翻译扩展、不影响你看视频。</p>
+      <p>在字幕身份可确认的平台按视频累加记录；无法确认时单独建档，不按页面路径盲目合并。</p>
     </div>
   </div>
 </section>
@@ -227,10 +227,10 @@
   <div class="privacy">
     <h2>🔒 隐私优先</h2>
     <ul>
-      <li>✅ 字幕文本<strong>只在你的浏览器本地处理</strong>，不上传（我们根本没有服务器）</li>
-      <li>✅ 只有你<strong>主动点击</strong>单词时，才把<strong>那个单词本身</strong>发给公开词典接口</li>
+      <li>✅ 字幕匹配在本地处理；YouTube 原生兜底会向 YouTube 请求字幕轨，可能下载整轨</li>
+      <li>✅ 只有你<strong>主动点击</strong>单词时，才向公开词典请求该查询词</li>
       <li>✅ 「已斩词」和收集记录保存在浏览器本地，不离开你的设备</li>
-      <li>✅ 无需登录、无广告、无追踪、无统计分析</li>
+      <li>✅ 不上传字幕到扩展运营方，不发送遥测；原始字幕不作为长期记录保存</li>
     </ul>
     <p style="margin:18px 0 0"><a href="privacy.html" style="color:#2f7d52;font-weight:600">查看完整隐私政策 →</a></p>
   </div>

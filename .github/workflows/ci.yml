@@ -37,10 +37,14 @@ jobs:
           console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
 
           // ---- 扩展必需文件 ----
-          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json','cet6_words.json','ielts_words.json','vocabulary-sources.json','vocabulary-sources.html','licenses/cet6-LICENSE.txt','licenses/ielts-LICENSE.txt'];
+          const required = ['background.js','content.js','youtube-bridge.js','popup.html','popup.js','cet4_words.json','cet6_words.json','ielts_words.json','vocabulary-sources.json','vocabulary-sources.html','licenses/cet6-LICENSE.txt','licenses/ielts-LICENSE.txt','scripts/test-subtitle-pipeline.js'];
           for (const f of required) {
             if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
           }
+          const bridge = m.content_scripts.find((entry) => (entry.js || []).includes('youtube-bridge.js'));
+          if (!bridge || bridge.world !== 'MAIN' || bridge.run_at !== 'document_start' ||
+              bridge.matches.some(pattern => !pattern.includes('youtube.com'))) fail('YouTube bridge 必须仅匹配 YouTube 并运行在 MAIN/document_start');
+          if (Number(m.minimum_chrome_version) < 111) fail('MAIN world content script 要求 minimum_chrome_version 至少为 111');
           console.log('✅ 必需文件齐全: ' + required.join(', '));
 
           // ---- 图标 ----
@@ -69,9 +73,14 @@ jobs:
           console.log('✅ background.js 语法正确');
           new (require('vm').Script)(fs.readFileSync('content.js','utf8'));
           console.log('✅ content.js 语法正确');
+          new (require('vm').Script)(fs.readFileSync('youtube-bridge.js','utf8'));
+          console.log('✅ youtube-bridge.js 语法正确');
           new (require('vm').Script)(fs.readFileSync('popup.js','utf8'));
           console.log('✅ popup.js 语法正确');
 
           console.log('');
           console.log('🎉 全部检查通过');
           "
+
+      - name: 合并、重发、恢复和竞争写入 Mock 验证
+        run: node scripts/test-subtitle-pipeline.js

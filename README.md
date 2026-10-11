@@ -18,15 +18,17 @@
 
 | 功能 | 说明 |
 |------|------|
-| **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文），未开启时自动回退到 YouTube 原生字幕 |
+| **实时增量抓词** | 读取可见的「沉浸式翻译」英文原文和可读取的标准英文字幕轨；YouTube 还有原生字幕整轨兜底 |
+| **按视频持久累加** | 新字幕只增加词卡或时间点；弹窗、页面刷新和可靠识别的 YouTube 视频重开后继续显示本地记录 |
+| **弹窗自动更新** | 弹窗保持打开时收到新词卡，不打断搜索、滚动或详情查看 |
 | **单选词库** | 四级 / 六级 / 雅思每次选一项，记住上次选择；当前列表、历史词数和已斩词随选择筛选 |
 | **全部命中标签** | 重叠词显示全部类别，例如「六级」「雅思」；采集保存三份词库并集，切换无需重新抓取 |
-| **去重 + 时间点** | 同一个词只列一次，记录它在视频里出现的位置（`mm:ss`），最多显示前 10 个 |
+| **去重 + 时间点** | 同一个词只列一次，记录它在视频里出现的位置（`mm:ss`；字幕轨可精确到 0.1 秒），最多显示前 10 个 |
 | **一键「斩」** | 标记为熟悉词后，词卡变灰并计入已斩；三个词库共享熟悉词记录 |
 | **点击查详情** | 点任意单词 → 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
 | **只读不打扰** | 纯只读监听页面字幕元素，不修改任何页面内容，不影响翻译扩展与视频播放 |
-| **跨站点** | 不局限于 YouTube，任何页面上出现字幕（配合沉浸式翻译）都能收集 |
+| **身份不确定时隔离** | 非 YouTube 页面无法确认视频身份时按页面连接单独记录并保留历史；重开可能产生另一份记录，不会按路径盲目合并 |
 
 ## 显示规则
 
@@ -55,7 +57,7 @@
 3. 点击 **加载解压缩的扩展**，选择仓库根目录
 4. 其余同 Chrome
 
-> 使用前请确保视频页面上已经显示字幕（推荐配合沉浸式翻译的双语字幕），并让视频持续播放 —— 单词是跟着字幕一句句累积的。
+> 需要 Chrome / Edge 111 或更新版本。使用前让视频页面显示英文字幕（沉浸式翻译原文、可读的标准字幕轨，或 YouTube 原生英文轨）。正常路径随播放增量采集；YouTube 原生兜底会请求整条字幕轨，可能提前收集尚未播放的内容。
 
 ---
 
@@ -65,7 +67,8 @@
 .
 ├── manifest.json          # 扩展配置（MV3）
 ├── background.js          # 核心逻辑：词形还原/生成、词表匹配、词典查询、消息路由
-├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
+├── content.js             # 页面侧：字幕增量、待确认缓存、连接恢复
+├── youtube-bridge.js      # 仅 YouTube 页面 MAIN world 字幕变量桥接
 ├── popup.html / popup.js  # 弹窗界面：单词列表、详情、斩词、历史
 ├── cet4_words.json        # 四级词表（约 4590 词）
 ├── cet6_words.json        # 六级词表（2219 词，CC BY-SA 4.0）
@@ -92,16 +95,17 @@
 
 ```
 视频页面
-  ├─ 沉浸式翻译字幕（#immersive-translate-caption-window 的 Shadow DOM）
-  │     └─ .source-cue 英文原文
-  └─ YouTube 原生字幕（备用通道）
-        ↓  MutationObserver 监听变化
-content.js  提取英文字幕文本 → 发给 background
+  ├─ 沉浸式翻译字幕（Shadow DOM .source-cue）
+  ├─ 可读取的标准英文 TextTrack（cuechange）
+  └─ YouTube 原生字幕整轨（只在 YouTube 页面使用 MAIN world 桥接）
+        ↓  新字幕事件 / 有界整轨批次
+content.js  提取英文字幕文本 → 保留未确认事件并增量发送
         ↓  chrome.runtime.sendMessage
 background.js
-  ├─ lemmatize()  词形还原（不规则动词表 + 规则变形 + 词表查证）
-  ├─ matchVocabulary()  与三份词表并集比对，命中即记录 surface / lemma / 全部类别 / 时间点
-  └─ chrome.storage.local  按 videoId 存储，最多保留前 10 个时间点
+  ├─ 增量分词和词形还原，只处理新字幕
+  ├─ 按视频串行合并词卡与时间点，多标签页结果不会相互覆盖
+  ├─ 立即通知弹窗；独立合并本地写入并在成功后确认页面输入
+  └─ chrome.storage.local 持久保存；每个词最多保留前 10 个不同时间点
         ↓
 popup.js  按所选词库渲染单词列表 / 详情 / 斩词 / 历史
           点击单词 → LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
@@ -109,10 +113,11 @@ popup.js  按所选词库渲染单词列表 / 详情 / 斩词 / 历史
 
 ### 隐私
 
-- 字幕文本**只在你的浏览器本地处理**，不上传（本扩展没有服务器）。
+- 沉浸式翻译和标准字幕轨只在本地处理。YouTube 原生字幕兜底会向 YouTube 请求字幕轨，可能下载整条字幕并包含尚未播放的部分；字幕和匹配结果不会上传到本扩展的服务器（本扩展没有服务器）。
 - 只有你**主动点击**某个单词时，才把**该单词本身**发给公开词典接口（`api.dictionaryapi.dev`、`en.wiktionary.org`）。
 - 「已斩词」和收集记录保存在 `chrome.storage.local`，不离开设备。
-- 无登录、无广告、无追踪、无统计分析。
+- 原始字幕不会作为长期记录保存；页面仍存活时，尚未获得本地写入确认的短期缓存留在页面内存中。浏览器与页面同时突然关闭前最后一小段未确认内容可能丢失。
+- 无登录、无广告、无追踪；本地阶段计时不发送遥测。
 
 完整内容见 [`docs/privacy.html`](docs/privacy.html)。
 
@@ -142,7 +147,7 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、三份 `*_words.json`、`vocabulary-sources.json`、`vocabulary-sources.html`、`licenses/`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
+也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`youtube-bridge.js`、`popup.html`、`popup.js`、三份 `*_words.json`、`vocabulary-sources.json`、`vocabulary-sources.html`、`licenses/`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
 
 ---
 

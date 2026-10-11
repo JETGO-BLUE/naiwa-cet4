@@ -62,6 +62,23 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .capture-status {
+      font-size: 11px;
+      color: var(--sub);
+      margin-top: 5px;
+      min-height: 16px;
+      line-height: 1.4;
+      max-height: 34px;
+      overflow: hidden;
+    }
+    .capture-status.error { color: var(--accent); }
+    .perf-diagnostics {
+      font-size: 11px;
+      color: var(--sub);
+      margin-top: 5px;
+    }
+    .perf-diagnostics summary { cursor: pointer; user-select: none; }
+    .perf-diagnostics-content { line-height: 1.6; padding: 4px 0 0 10px; }
     .tabs {
       display: flex;
       background: var(--card);
@@ -381,6 +398,11 @@
   <header>
     <h1><img src="icons/icon48.png" class="logo-img" alt="" />奶娃过四级</h1>
     <div class="video-title" id="videoTitle">尚未捕获视频</div>
+    <div class="capture-status" id="captureStatus" role="status" aria-live="polite">等待字幕状态</div>
+    <details class="perf-diagnostics">
+      <summary>本地阶段计时（当前后台进程）</summary>
+      <div class="perf-diagnostics-content" id="perfMetrics">等待样本</div>
+    </details>
   </header>
 
   <div class="vocabulary-picker">

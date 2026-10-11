@@ -48,7 +48,7 @@ jobs:
           NAME="naiwa-cet4-v${VERSION}"
           mkdir -p "dist/${NAME}"
           # 只把扩展运行必需的文件打进 zip
-          cp manifest.json background.js content.js popup.html popup.js cet4_words.json cet6_words.json ielts_words.json vocabulary-sources.json vocabulary-sources.html "dist/${NAME}/"
+          cp manifest.json background.js content.js youtube-bridge.js popup.html popup.js cet4_words.json cet6_words.json ielts_words.json vocabulary-sources.json vocabulary-sources.html "dist/${NAME}/"
           cp -r licenses "dist/${NAME}/licenses"
           cp -r icons "dist/${NAME}/icons"
           cd dist
