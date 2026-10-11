@@ -37,7 +37,7 @@ jobs:
           console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
 
           // ---- 扩展必需文件 ----
-          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json'];
+          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json','quiz_bank.json'];
           for (const f of required) {
             if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
           }
@@ -54,6 +54,25 @@ jobs:
           const n = Object.keys(w).length;
           if (n < 1000) fail('词表条目过少，可能文件损坏: ' + n);
           console.log('✅ cet4_words.json 合法  共 ' + n + ' 个词条');
+
+          // ---- 题库 quiz_bank.json ----
+          const q = JSON.parse(fs.readFileSync('quiz_bank.json', 'utf8'));
+          const qn = Object.keys(q).length;
+          if (qn < 1000) fail('题库条目过少，可能文件损坏: ' + qn);
+          let badQ = 0;
+          for (const [word, ds] of Object.entries(q)) {
+            if (!Array.isArray(ds) || ds.length !== 3 || new Set(ds).size !== 3) { badQ++; continue; }
+            if (ds.includes(word)) { badQ++; continue; }
+            const means = new Set([w[word]]);
+            let okD = true;
+            for (const d of ds) {
+              if (!w[d]) { okD = false; break; }
+              means.add(w[d]);
+            }
+            if (!okD || means.size !== 4) badQ++;
+          }
+          if (badQ > 0) fail('题库有 ' + badQ + ' 个词条不合法（干扰项数量 / 重复 / 释义撞车）');
+          console.log('✅ quiz_bank.json 合法  共 ' + qn + ' 个词条，均为 3 个干扰项且 4 条释义互不相同');
 
           // ---- background.js 语法检查 ----
           new (require('vm').Script)(fs.readFileSync('background.js','utf8'));
