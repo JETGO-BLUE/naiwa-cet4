@@ -2,11 +2,11 @@
 
 > 看视频的时候，把四级词汇悄悄攒起来。
 
-[![Version](https://img.shields.io/badge/version-1.2.0-c2572a)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.3.0-c2572a)](manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
 [![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
 
-一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级词汇范围内的英文单词**，去重、标注出现时间点、一键查看单词变形与释义，还能像背单词 App 一样把已经熟悉的词「斩」掉。
+一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级词汇范围内的英文单词**，去重、每 3 分钟记录一次出现时间点，用**四选一选择题**帮你把词记牢（可点读发音），还能把已经熟悉的词一键「斩」掉。
 
 <p align="center">
   <img src="icons/icon128.png" width="110" alt="奶娃过四级">
@@ -24,9 +24,10 @@
 | 功能 | 说明 |
 |------|------|
 | **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文），未开启时自动回退到 YouTube 原生字幕 |
-| **去重 + 时间点** | 同一个词只列一次，记录它在视频里出现的位置（`mm:ss`），最多显示前 10 个 |
-| **一键「斩」** | 标记为熟悉词后，该词不再出现在单词列表中，越用越清爽 |
-| **点击查详情** | 点任意单词 → 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
+| **去重 + 时间点** | 同一个词只列一次；按 **3 分钟一个区间**记录位置（`0:00 / 3:00 / 6:00…`），最多 10 个 |
+| **四选一记词** | 不直接给答案：单击单词朗读发音，从 4 个中文释义里选。选错标 ❌，选对亮出释义。**4590 词题库内置，出题不联网** |
+| **一键「斩」** | 标记为熟悉词后，该词**立刻从当前列表移除**，越用越清爽 |
+| **点「详解」看详情** | 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
 | **只读不打扰** | 纯只读监听页面字幕元素，不修改任何页面内容，不影响翻译扩展与视频播放 |
 | **跨站点** | 不局限于 YouTube，任何页面上出现字幕（配合沉浸式翻译）都能收集 |
@@ -64,6 +65,7 @@
 ├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
 ├── popup.html / popup.js  # 弹窗界面：单词列表、详情、斩词、历史
 ├── cet4_words.json        # 四级词表（约 4590 词）
+├── quiz_bank.json         # 出题题库：每个词的 3 个形近/易混干扰释义（本地生成）
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
@@ -92,10 +94,12 @@ content.js  提取英文字幕文本 → 发给 background
 background.js
   ├─ lemmatize()  词形还原（不规则动词表 + 规则变形 + 词表查证）
   ├─ matchCET4()  与 cet4_words.json 比对，命中即记录 surface / lemma / 时间点
-  └─ chrome.storage.local  按 videoId 存储，最多保留前 10 个时间点
+  └─ chrome.storage.local  按 videoId 存储，时间点按 3 分钟分区，最多保留 10 个
         ↓
-popup.js  渲染单词列表 / 详情 / 斩词 / 历史
-          点击单词 → LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
+popup.js  渲染单词列表 / 四选一题目 / 详情 / 斩词 / 历史
+          单击单词 → 系统语音朗读（本地）
+          选答案   → 全在本地判分，题库来自 quiz_bank.json
+          点「详解」→ LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
 ```
 
 ### 隐私
@@ -129,11 +133,11 @@ cd naiwa-cet4
 
 ```bash
 # 打完 tag 推送，GitHub Actions 会自动产出 zip 到 Release
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
-也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、`cet4_words.json`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
+也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、`cet4_words.json`、`quiz_bank.json`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
 
 ---
 

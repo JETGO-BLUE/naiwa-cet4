@@ -7,6 +7,46 @@ let familiarWords = [];
 let currentTab = 'current';
 let searchKeyword = '';
 
+// 出题相关的内存态（关掉弹窗即重置；跨会话只保留"已斩词"）
+const quizCache = new Map(); // word -> quiz | null（null = 题库里没有，避免反复请求）
+const quizState = new Map(); // word -> { wrong:Set<number>, solved:boolean }
+
+// ============ 发音：浏览器内置语音合成（本地，不联网、不加权限） ============
+function pickEnglishVoice() {
+  try {
+    const vs = window.speechSynthesis.getVoices() || [];
+    return (
+      vs.find((v) => /^en[-_]US/i.test(v.lang)) ||
+      vs.find((v) => /^en[-_]/i.test(v.lang)) ||
+      null
+    );
+  } catch (e) {
+    return null;
+  }
+}
+
+function speakWord(word) {
+  if (!word) return;
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel(); // 连点只读最后一次
+    const u = new SpeechSynthesisUtterance(String(word));
+    u.lang = 'en-US';
+    u.rate = 0.9;
+    const v = pickEnglishVoice();
+    if (v) u.voice = v;
+    synth.speak(u);
+  } catch (e) {
+    /* 系统无语音包时静默失败，不影响其他功能 */
+  }
+}
+
+// 预热一次语音列表（Chrome 首次 getVoices() 常返回空）
+try {
+  if (window.speechSynthesis) window.speechSynthesis.getVoices();
+} catch (e) {}
+
 // 发送消息到 background（Promise 包装）
 function send(msg) {
   return new Promise((resolve) => {
@@ -94,7 +134,7 @@ function render() {
   } else {
     titleEl.textContent = '尚未捕获视频';
   }
-  renderCurrent();
+  renderCurrent().catch((err) => console.error('[popup] renderCurrent 出错', err));
   renderFamiliar();
 }
 
@@ -114,8 +154,8 @@ function renderDebug() {
   );
 }
 
-// 渲染当前视频单词列表
-function renderCurrent() {
+// 渲染当前视频单词列表（百词斩式：不直接给中文释义，改成四选一）
+async function renderCurrent() {
   const container = document.getElementById('currentContent');
   if (!currentRecord) {
     if (lastStatus && lastStatus.type === 'no_captions') {
@@ -147,89 +187,152 @@ function renderCurrent() {
     return;
   }
 
-  const words = currentRecord.words || [];
+  const all = currentRecord.words || [];
   const slashedSet = new Set(familiarWords);
+  const slashedCount = all.filter((w) => slashedSet.has(w.word)).length;
+  // ① 已经斩过的词汇，不再出现在单词表内
+  const active = all.filter((w) => !slashedSet.has(w.word));
+
   const kw = searchKeyword.trim().toLowerCase();
-
-  // 过滤
-  let shown = words.filter((w) => {
-    if (kw) {
-      return w.word.toLowerCase().includes(kw) || (w.meaning || '').toLowerCase().includes(kw);
-    }
-    return true;
-  });
-
-  const shownCount = shown.length;
-  const slashedCount = words.filter((w) => slashedSet.has(w.word)).length;
-  const activeCount = words.filter((w) => !slashedSet.has(w.word)).length;
+  const shown = kw
+    ? active.filter(
+        (w) =>
+          w.word.toLowerCase().includes(kw) ||
+          (w.meaning || '').toLowerCase().includes(kw)
+      )
+    : active;
 
   // 顶部统计
-  let statsHtml = `
+  const statsHtml = `
     <div class="stats">
-      <div class="stat"><b>${words.length}</b>四级词</div>
-      <div class="stat"><b>${activeCount}</b>待记</div>
+      <div class="stat"><b>${all.length}</b>四级词</div>
+      <div class="stat"><b>${active.length}</b>待记</div>
       <div class="stat"><b>${slashedCount}</b>已斩</div>
     </div>`;
 
-  if (words.length === 0) {
-    container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到四级词汇</div>';
+  if (all.length === 0) {
+    container.innerHTML =
+      statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到四级词汇</div>';
+    return;
+  }
+
+  if (active.length === 0) {
+    container.innerHTML =
+      statsHtml +
+      '<div class="empty"><div class="icon">🎉</div>这个视频的四级词都被你斩完了<br/><br/>' +
+      '想找回来？切到「已斩词」页，点词后面的 ✕ 即可撤销。</div>';
     return;
   }
 
   if (shown.length === 0) {
-    container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🔍</div>没有匹配「' + escapeHtml(searchKeyword) + '」的单词</div>';
+    container.innerHTML =
+      statsHtml + '<div class="empty"><div class="icon">🔍</div>没有匹配「' + escapeHtml(searchKeyword) + '」的单词</div>';
     return;
   }
 
+  // 先把题目准备好（本地题库，一次批量取回）
+  await ensureQuizzes(shown);
+
+  const byWord = new Map(shown.map((w) => [w.word, w]));
   let cardsHtml = '';
   for (const w of shown) {
-    const isSlashed = slashedSet.has(w.word);
-    const timesHtml = (w.times || []).slice(0, 10)
+    const wd = escapeHtml(w.word);
+    const timesHtml = (w.times || [])
+      .slice(0, 10)
       .map((t) => `<span class="time-tag">${t}</span>`)
       .join('');
-    const lemmaHint = w.lemma && w.lemma !== w.word
-      ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
-      : '';
+    const lemmaHint =
+      w.lemma && w.lemma !== w.word
+        ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
+        : '';
     cardsHtml += `
-      <div class="word-card ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
+      <div class="word-card" data-word="${wd}">
         <div class="word-head">
-          <div class="word-left word-clickable" data-word="${escapeHtml(w.word)}">
-            <div class="word-text">${escapeHtml(w.word)}${lemmaHint}</div>
-            <div class="word-meaning">${escapeHtml(w.meaning || '')}</div>
+          <div class="word-left">
+            <div class="word-text" data-word="${wd}" title="点击听发音">${escapeHtml(w.word)}${lemmaHint}<span class="spk">🔊</span></div>
           </div>
-          <button class="slash-btn ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
-            ${isSlashed ? '已斩 ✓' : '斩'}
-          </button>
+          <div class="word-actions">
+            <button class="mini-btn detail-btn" data-word="${wd}">详解</button>
+            <button class="slash-btn" data-word="${wd}">斩</button>
+          </div>
         </div>
+        <div class="quiz-host"></div>
         <div class="times">${timesHtml}</div>
       </div>`;
   }
 
   container.innerHTML = statsHtml + cardsHtml;
 
-  // 点击单词（非斩词按钮）→ 弹出详情
-  container.querySelectorAll('.word-clickable').forEach((el) => {
-    el.addEventListener('click', async (e) => {
-      const word = el.getAttribute('data-word');
-      openDetail(word);
-    });
+  // 逐卡把题目填进去
+  container.querySelectorAll('.word-card').forEach((card) => {
+    const w = byWord.get(card.getAttribute('data-word'));
+    if (w) renderQuizBlock(card, w);
   });
+}
 
-  // 绑定斩词按钮
-  container.querySelectorAll('.slash-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const word = btn.getAttribute('data-word');
-      if (familiarWords.includes(word)) {
-        await send({ type: 'UNSLASH_WORD', word: word });
-      } else {
-        await send({ type: 'SLASH_WORD', word: word });
-      }
-      const resp = await send({ type: 'GET_FAMILIAR' });
-      familiarWords = resp.familiar || [];
-      render();
-    });
+// ============ 出题（全部走本地题库，不联网） ============
+// 批量取题，只请求没缓存过的词
+async function ensureQuizzes(words) {
+  const missing = [];
+  for (const w of words) {
+    if (!quizCache.has(w.word)) missing.push(w.word);
+  }
+  if (missing.length === 0) return;
+  const resp = await send({ type: 'GET_QUIZ_BATCH', words: missing });
+  const quizzes = (resp && resp.quizzes) || {};
+  for (const w of missing) quizCache.set(w, quizzes[w] || null);
+}
+
+function getQuizState(word) {
+  let st = quizState.get(word);
+  if (!st) {
+    st = { wrong: new Set(), solved: false };
+    quizState.set(word, st);
+  }
+  return st;
+}
+
+// 一道题：4 个中文释义选项（选错标 ❌，选对展开释义）
+function quizHtml(q, st, word) {
+  if (!q || !q.options || q.options.length < 2) {
+    return '<div class="quiz-loading">这道题暂时出不来（该词不在题库内）</div>';
+  }
+
+  let h = '<div class="quiz">';
+  q.options.forEach((opt, i) => {
+    const isAnswer = i === q.answer;
+    let cls = 'opt';
+    let mark = '';
+    if (st.solved && isAnswer) {
+      cls += ' correct';
+      mark = '<span class="mark">✔</span>';
+    } else if (st.wrong.has(i)) {
+      cls += ' wrong';
+      mark = '<span class="mark">❌</span>';
+    }
+    const dis = st.solved || st.wrong.has(i) ? ' disabled' : '';
+    h +=
+      `<button class="${cls}"${dis} data-i="${i}">` +
+      `<span class="idx">${'ABCD'[i] || i + 1}</span>` +
+      `<span class="txt">${escapeHtml(opt)}</span>${mark}</button>`;
   });
+  h += '</div>';
+
+  if (st.solved) {
+    h +=
+      `<div class="answer-reveal" data-word="${escapeHtml(word)}">` +
+      `<span>✅ 答对了 · 释义：<b>${escapeHtml(q.correct)}</b></span>` +
+      `<span class="more">点此看详解 ▸</span></div>`;
+  } else {
+    h += '<div class="quiz-tip">单击单词可听发音 · 选出正确的中文释义</div>';
+  }
+  return h;
+}
+
+function renderQuizBlock(card, w) {
+  const host = card.querySelector('.quiz-host');
+  if (!host) return;
+  host.innerHTML = quizHtml(quizCache.get(w.word), getQuizState(w.word), w.word);
 }
 
 // 渲染已斩词列表
@@ -342,6 +445,69 @@ document.getElementById('clearFamiliarBtn').addEventListener('click', async () =
   render();
 });
 
+// ============ 当前列表的点击委托（只绑一次，innerHTML 重绘后依然有效） ============
+function bindCurrentDelegation() {
+  const container = document.getElementById('currentContent');
+  if (!container || container.dataset.bound === '1') return;
+  container.dataset.bound = '1';
+
+  container.addEventListener('click', async (e) => {
+    // 1) 单击单词 → 听发音
+    const spk = e.target.closest('.word-text');
+    if (spk) {
+      speakWord(spk.getAttribute('data-word'));
+      return;
+    }
+
+    // 2) 单击选项 → 判对错
+    const opt = e.target.closest('.opt');
+    if (opt && !opt.disabled) {
+      const card = opt.closest('.word-card');
+      const word = card ? card.getAttribute('data-word') : null;
+      const q = word ? quizCache.get(word) : null;
+      if (!q) return;
+      const st = getQuizState(word);
+      if (st.solved) return;
+      const i = parseInt(opt.getAttribute('data-i'), 10);
+      if (i === q.answer) {
+        st.solved = true; // 答对：选项变绿 + 展开中文释义
+      } else {
+        st.wrong.add(i); // 答错：该选项旁出现 ❌
+      }
+      if (card) renderQuizBlock(card, { word: word }); // 只重画这一张卡，不跳动列表
+      return;
+    }
+
+    // 3) 单击「✅ 答对了」释义条 → 打开原来的详情面板（变形 / 同根词 / 联网释义）
+    const rev = e.target.closest('.answer-reveal');
+    if (rev) {
+      openDetail(rev.getAttribute('data-word'));
+      return;
+    }
+
+    // 4) 单击「详解」→ 同样打开详情面板
+    const det = e.target.closest('.detail-btn');
+    if (det) {
+      openDetail(det.getAttribute('data-word'));
+      return;
+    }
+
+    // 5) 单击「斩」→ 标记为熟悉词（随后被踢出当前列表）
+    const sb = e.target.closest('.slash-btn');
+    if (sb) {
+      const word = sb.getAttribute('data-word');
+      if (familiarWords.includes(word)) {
+        await send({ type: 'UNSLASH_WORD', word: word });
+      } else {
+        await send({ type: 'SLASH_WORD', word: word });
+      }
+      const resp = await send({ type: 'GET_FAMILIAR' });
+      familiarWords = resp.familiar || [];
+      render();
+    }
+  });
+}
+
 // ============ 单词详情弹窗 ============
 // 两阶段渲染：本地数据（原型/精简释义/单词变形/同根词）先秒出，联网释义后补
 async function openDetail(word) {
@@ -446,4 +612,5 @@ document.getElementById('detailPanel').addEventListener('click', (e) => {
 });
 
 // 启动
+bindCurrentDelegation();
 init();

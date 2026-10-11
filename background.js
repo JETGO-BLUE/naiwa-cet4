@@ -185,40 +185,40 @@ function fmtTime(sec) {
 }
 
 // ============ 4. 字幕处理 ============
-const MAX_TIMES = 10; // 每个词最多保留前 10 个时间点
+const MAX_TIMES = 10;        // 每个词最多保留 10 个时间点
+const TIME_BUCKET_SEC = 180; // 时间点按「每 3 分钟」记录一次（3*60 秒一个区）
 
 async function processCaptions(msg) {
   const cet4Map = await loadCET4();
   const { videoId, title, cues } = msg;
 
-  const wordMap = new Map(); // surface -> { meaning, lemma, times }
+  const wordMap = new Map(); // surface -> { meaning, lemma, buckets }
 
   for (const cue of cues) {
     const words = extractCET4Words(cue.text, cet4Map);
+    const bucket = Math.floor(cue.start / TIME_BUCKET_SEC); // 落在第几个 3 分钟区
     for (const surface of words) {
       const m = matchCET4(surface, cet4Map);
       if (!wordMap.has(surface)) {
         wordMap.set(surface, {
           meaning: m ? m.meaning : '',
           lemma: m ? m.lemma : surface,
-          times: [],
+          buckets: new Set(),
         });
       }
-      wordMap.get(surface).times.push(fmtTime(cue.start));
+      wordMap.get(surface).buckets.add(bucket); // 同一个 3 分钟区只算一次
     }
   }
 
   const result = [];
   for (const [word, data] of wordMap) {
-    const uniqueTimes = [];
-    for (const t of data.times) {
-      if (uniqueTimes[uniqueTimes.length - 1] !== t) uniqueTimes.push(t);
-    }
+    const buckets = Array.from(data.buckets).sort((a, b) => a - b);
     result.push({
       word: word,          // 字幕原样
       lemma: data.lemma,   // 还原词根
       meaning: data.meaning,
-      times: uniqueTimes.slice(0, MAX_TIMES), // 只保留前 10 个
+      // 每个 3 分钟区取区首时间（0:00 / 3:00 / 6:00…），最多 10 个
+      times: buckets.slice(0, MAX_TIMES).map((b) => fmtTime(b * TIME_BUCKET_SEC)),
     });
   }
 
@@ -529,6 +529,87 @@ function findCognates(lemma, cet4Map) {
   return arr.slice(0, 12);
 }
 
+// ============ 6. 出题（百词斩式单选题，题库全本地、不联网） ============
+let QUIZ = null;
+async function loadQuiz() {
+  if (QUIZ) return QUIZ;
+  try {
+    const url = chrome.runtime.getURL('quiz_bank.json');
+    const resp = await fetch(url);
+    QUIZ = await resp.json();
+    console.log('[YT-CET4] 题库加载完成，共', Object.keys(QUIZ).length, '词');
+    return QUIZ;
+  } catch (e) {
+    console.error('[YT-CET4] 题库加载失败，将用词表兜底出题', e);
+    QUIZ = {};
+    return QUIZ;
+  }
+}
+
+let CET4_KEYS = null;
+function cet4Keys(cet4Map) {
+  if (!CET4_KEYS) CET4_KEYS = Object.keys(cet4Map);
+  return CET4_KEYS;
+}
+
+// 给一个词生成单选题：正确的四级释义 1 个 + 形近/易混干扰释义 3 个，打乱顺序
+function buildQuiz(word, cet4Map, bank) {
+  const w = String(word || '').toLowerCase();
+  const lemma = lemmatize(w);
+  let base;
+  if (cet4Map[w]) base = w;
+  else if (cet4Map[lemma]) base = lemma;
+  else return null;
+
+  const correct = trimMeaning(cet4Map[base], 2) || cet4Map[base];
+  const opts = [];
+  const seen = new Set([correct]);
+
+  // 1) 优先用预生成题库里的形近干扰词
+  const ds = (bank && (bank[base] || bank[w])) || [];
+  for (const d of ds) {
+    if (opts.length >= 3) break;
+    const dm = cet4Map[d];
+    if (!dm) continue;
+    const t = trimMeaning(dm, 2) || dm;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    opts.push(t);
+  }
+
+  // 2) 兜底：题库缺失或不足时，现场从词表按「首字母相同 → 长度相同」补
+  const fill = (pred) => {
+    for (const k of cet4Keys(cet4Map)) {
+      if (opts.length >= 3) return;
+      if (k === base || k === w) continue;
+      if (pred && !pred(k)) continue;
+      const t = trimMeaning(cet4Map[k], 2) || cet4Map[k];
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      opts.push(t);
+    }
+  };
+  fill((k) => k[0] === base[0]);
+  fill((k) => k[0] === base[0] || k.length === base.length);
+  fill(null);
+
+  const options = opts.concat([correct]);
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = options[i];
+    options[i] = options[j];
+    options[j] = tmp;
+  }
+  return {
+    word: w,
+    base: base,
+    lemma: lemma !== w ? lemma : null,
+    correct: correct,
+    options: options,
+    answer: options.indexOf(correct),
+  };
+}
+
 // ============ 6. 斩词 ============
 async function slashWord(word) {
   const key = 'familiarWords';
@@ -609,6 +690,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const word = (msg.word || '').toLowerCase();
         const online = await lookupWordOnline(word);
         sendResponse({ ok: true, online: online });
+        break;
+      }
+
+      // 出题（本地题库）：给一批词各出 4 个中文释义选项
+      case 'GET_QUIZ_BATCH': {
+        const cet4Map = await loadCET4();
+        const bank = await loadQuiz();
+        const list = Array.isArray(msg.words) ? msg.words : [];
+        const quizzes = {};
+        for (const w of list) {
+          const q = buildQuiz(w, cet4Map, bank);
+          if (q) quizzes[w] = q;
+        }
+        sendResponse({ ok: true, quizzes: quizzes });
         break;
       }
 

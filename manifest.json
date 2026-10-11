@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "奶娃过四级",
-  "version": "1.2.0",
-  "description": "奶娃陪你过四级：收集视频字幕中的四级词汇（优先读取沉浸式翻译的双语字幕），去重、标注出现时间点、查词形变化，支持「斩」掉熟悉词",
+  "version": "1.3.0",
+  "description": "奶娃陪你过四级：收集视频字幕中的四级词汇（优先读取沉浸式翻译的双语字幕），去重、按 3 分钟记录出现时间点、查词形变化，支持百词斩式四选一记词（可点读发音）",
   "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "http://*/*",
