@@ -281,8 +281,8 @@ async function run() {
   ];
   assert.deepEqual(Array.from(popupSandbox.modeWords(uiWords), (word) => word.word), ['studies'], 'normal mode hides basic words while keeping the selected vocabulary');
   popupSandbox.learningMode = 'quiz';
-  assert.deepEqual(Array.from(popupSandbox.modeWords(uiWords), (word) => word.word), ['a', 'studies'], 'quiz mode includes basic words in the selected vocabulary');
-  assert.deepEqual(Array.from(popupSandbox.activeWords(uiWords), (word) => word.word), ['a'], 'a familiar word remains hidden immediately in quiz mode');
+  assert.deepEqual(Array.from(popupSandbox.modeWords(uiWords), (word) => word.word), ['studies'], 'quiz mode also hides basic words in the selected vocabulary');
+  assert.deepEqual(Array.from(popupSandbox.activeWords(uiWords), (word) => word.word), [], 'familiar words remain hidden immediately in quiz mode');
   popupSandbox.selectedVocabulary = 'ielts';
   assert.deepEqual(Array.from(popupSandbox.modeWords(uiWords), (word) => word.word), ['studies', 'aberration'], 'mode filtering respects the selected IELTS vocabulary');
   assert.equal(popupSandbox.questionLemma(uiWords[1]), 'study', 'the question uses the prototype while the card keeps the surface form');

@@ -236,6 +236,7 @@ const MAX_CACHED_RECORDS = 32;
 const MAX_EVENT_IDS = 2048;
 const recordEntries = new Map();
 const recordLoads = new Map();
+const deletingRecords = new Set();
 const perfSamples = [];
 const MAX_PERF_SAMPLES = 256;
 
@@ -332,6 +333,7 @@ function trimRecordCache() {
 }
 
 async function getRecordEntry(recordId) {
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
   if (recordEntries.has(recordId)) {
     const entry = recordEntries.get(recordId);
     recordEntries.delete(recordId);
@@ -375,6 +377,55 @@ async function getRecordEntry(recordId) {
   })().finally(() => recordLoads.delete(recordId));
   recordLoads.set(recordId, loading);
   return loading;
+}
+
+async function deleteVideoRecord(recordId) {
+  if (!validRecordId(recordId)) throw new Error('视频记录标识无效');
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+  deletingRecords.add(recordId);
+  let entry = null;
+  let entryWasSavePaused = false;
+  try {
+    const pendingLoad = recordLoads.get(recordId);
+    if (pendingLoad) {
+      try { await pendingLoad; } catch (_) {}
+    }
+    entry = recordEntries.get(recordId) || null;
+    if (entry) {
+      entryWasSavePaused = entry.savePaused;
+      entry.savePaused = true;
+      clearTimeout(entry.saveTimer);
+      entry.saveTimer = null;
+      if (entry.mergePromise) await entry.mergePromise;
+      if (entry.savePromise) await entry.savePromise;
+      clearTimeout(entry.saveTimer);
+      entry.saveTimer = null;
+    }
+
+    const all = await chrome.storage.local.get(null);
+    const fallback = Object.keys(all)
+      .filter((key) => key.startsWith('video_') && key !== recordKey(recordId))
+      .map((key) => ({ id: key.slice(6), record: all[key] }))
+      .sort((a, b) => (Number(b.record && b.record.capturedAt) || 0) - (Number(a.record && a.record.capturedAt) || 0))[0];
+    await chrome.storage.local.remove(recordKey(recordId));
+    if (all.lastVideoId === recordId) {
+      try {
+        if (fallback && validRecordId(fallback.id)) await chrome.storage.local.set({ lastVideoId: fallback.id });
+        else await chrome.storage.local.remove('lastVideoId');
+      } catch (_) {
+        // The video record is already deleted; a stale lastVideoId is harmless.
+      }
+    }
+    recordEntries.delete(recordId);
+  } catch (error) {
+    if (entry) {
+      entry.savePaused = entryWasSavePaused;
+      if (entry.dirty && !entry.saveTimer && !entry.savePromise) scheduleSave(entry, 0);
+    }
+    throw error;
+  } finally {
+    deletingRecords.delete(recordId);
+  }
 }
 
 function rememberEventId(entry, eventId) {
@@ -596,9 +647,11 @@ async function ingestCaptionEvents(msg, sender, events) {
   if (!validRecordId(recordId)) throw new Error('当前视频身份无效，字幕未保存');
   const owner = getOwner(sender, msg.sessionId);
   const entry = await getRecordEntry(recordId);
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
   if (entry.savePaused) throw new Error('本地保存连续失败，已暂停接收字幕。请先检查扩展存储空间后重新抓取。');
   const previousMerge = entry.mergePromise || Promise.resolve();
   const mergeTask = previousMerge.then(async () => {
+    if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
     const acceptedIds = [];
     const replayIds = [];
     const newEvents = [];
@@ -623,6 +676,7 @@ async function ingestCaptionEvents(msg, sender, events) {
     const receivedAtEpoch = nowEpoch();
     const matchStarted = nowEpoch();
     const index = await loadVocabularies();
+    if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
     const changedWords = new Map();
     const capturedEpochs = [];
     if (newEvents.length) {
@@ -1399,6 +1453,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           saveFailed: !!(cached && cached.savePaused),
           ...await getFamiliarWordsForDisplay(),
         });
+        break;
+      }
+
+      case 'DELETE_VIDEO': {
+        const videoId = msg.recordId || msg.videoId;
+        await deleteVideoRecord(videoId);
+        sendResponse({ ok: true, videoId: videoId });
         break;
       }
 

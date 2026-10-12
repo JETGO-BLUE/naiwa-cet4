@@ -33,7 +33,7 @@
     }
     header {
       background: var(--card);
-      padding: 14px 16px;
+      padding: 9px 16px 8px;
       border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
@@ -65,17 +65,31 @@
     .capture-status {
       font-size: 11px;
       color: var(--sub);
-      margin-top: 5px;
-      min-height: 16px;
-      line-height: 1.4;
-      max-height: 34px;
+      margin-top: 4px;
+      height: 16px;
+      line-height: 16px;
       overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
-    .capture-status.error { color: var(--accent); }
+    .capture-status::before {
+      content: '';
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin: 0 5px 1px 1px;
+      border-radius: 50%;
+      background: #9aa3b2;
+    }
+    .capture-status[data-state="saved"]::before { background: #43a047; }
+    .capture-status[data-state="error"],
+    .capture-status[data-state="save_failed"] { color: var(--sub); }
+    .capture-status[data-state="error"]::before,
+    .capture-status[data-state="save_failed"]::before { background: #e0a044; }
     .perf-diagnostics {
       font-size: 11px;
       color: var(--sub);
-      margin-top: 5px;
+      margin-top: 8px;
     }
     .perf-diagnostics summary { cursor: pointer; user-select: none; }
     .perf-diagnostics-content { line-height: 1.6; padding: 4px 0 0 10px; }
@@ -85,6 +99,30 @@
       border-bottom: 1px solid var(--border);
     }
     .vocabulary-picker { padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--border); }
+    .settings-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 36px;
+      padding: 4px 16px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      color: var(--sub);
+      font-size: 12px;
+    }
+    .settings-summary button {
+      flex: none;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+    .settings-summary button:hover { border-color: #b8c1cf; }
+    .settings-summary button:disabled { cursor: default; opacity: .55; }
     .vocabulary-row { display: flex; align-items: center; gap: 10px; }
     .vocabulary-row label { font-size: 13px; font-weight: 600; }
     .vocabulary-row select { flex: 1; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--text); }
@@ -116,11 +154,23 @@
       border-bottom-color: var(--accent);
       font-weight: 600;
     }
+    .diagnostics-button {
+      flex: 0 0 40px;
+      align-self: stretch;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: var(--card);
+      color: #63738d;
+      font-size: 17px;
+      cursor: pointer;
+    }
+    .diagnostics-button:hover,
+    .diagnostics-button[aria-expanded="true"] { color: var(--text); background: #f8f9fb; }
     .toolbar {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 10px 16px;
+      padding: 8px 16px;
       background: var(--card);
       border-bottom: 1px solid var(--border);
     }
@@ -145,7 +195,7 @@
     .btn-primary:hover { background: #c62828; }
     .btn-ghost { background: var(--tag); color: var(--tag-text); }
     .btn-ghost:hover { background: #e0e7ff; }
-    header, .vocabulary-picker, .tabs, .toolbar { flex-shrink: 0; }
+    header, .settings-summary, .vocabulary-picker, .tabs, .toolbar { flex-shrink: 0; }
     #tab-current, #tab-history, #tab-familiar { display: flex; flex-direction: column; flex: 1; min-height: 0; }
     .content {
       flex: 1;
@@ -264,13 +314,34 @@
       cursor: pointer;
     }
     .video-item:hover { border-color: var(--accent); }
+    .video-item .v-item-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
     .video-item .v-title {
+      flex: 1;
+      min-width: 0;
       font-size: 13px;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .video-delete {
+      flex: none;
+      padding: 3px 7px;
+      border: 1px solid #f0c5c5;
+      border-radius: 6px;
+      background: white;
+      color: var(--accent);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .video-delete:hover { background: #fff1f1; }
+    .video-delete:disabled { border-color: var(--border); color: #9aa3b2; cursor: default; }
     .video-item .v-meta { font-size: 12px; color: var(--sub); margin-top: 3px; }
     .muted { color: var(--sub); font-size: 12px; }
     /* 单词可点击提示 */
@@ -296,6 +367,28 @@
       border-radius: 12px;
       padding: 16px;
     }
+    .settings-box { max-width: 390px; }
+    .settings-box .vocabulary-picker { padding: 0; border: 0; }
+    .diagnostics-box { max-width: 400px; }
+    .diagnostics-state {
+      padding: 8px 10px;
+      border-radius: 7px;
+      background: #f4f6f9;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+    .diagnostics-debug {
+      max-height: 120px;
+      overflow-y: auto;
+      margin-top: 10px;
+      color: var(--sub);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .diagnostics-box .perf-diagnostics { margin-top: 12px; }
+    .diagnostics-box .perf-diagnostics-content { max-height: 190px; overflow-y: auto; }
     .detail-head {
       display: flex;
       align-items: center;
@@ -477,36 +570,18 @@
     <h1><img src="icons/icon48.png" class="logo-img" alt="" />奶娃过四级</h1>
     <div class="video-title" id="videoTitle">尚未捕获视频</div>
     <div class="capture-status" id="captureStatus" role="status" aria-live="polite">等待字幕状态</div>
-    <details class="perf-diagnostics">
-      <summary>本地阶段计时（当前后台进程）</summary>
-      <div class="perf-diagnostics-content" id="perfMetrics">等待样本</div>
-    </details>
   </header>
 
-  <div class="vocabulary-picker">
-    <div class="vocabulary-row">
-      <label for="vocabularySelect">词库</label>
-      <select id="vocabularySelect" disabled>
-        <option value="cet4">四级</option>
-        <option value="cet6">六级</option>
-        <option value="ielts">雅思（社区学术词表）</option>
-      </select>
-      <a href="vocabulary-sources.html" target="_blank" rel="noopener">词表来源</a>
-    </div>
-    <div class="learning-mode-row">
-      <label for="learningModeSelect">模式</label>
-      <select id="learningModeSelect" disabled>
-        <option value="normal">普通模式</option>
-        <option value="quiz">测试模式</option>
-      </select>
-    </div>
-    <div class="vocabulary-status" id="vocabularyStatus" role="status">正在加载词库…</div>
+  <div class="settings-summary">
+    <span id="settingsSummaryText">四级 · 普通模式</span>
+    <button type="button" id="settingsOpenBtn" aria-controls="settingsPanel" aria-expanded="false" disabled>⚙ 设置</button>
   </div>
 
   <div class="tabs">
     <div class="tab active" data-tab="current">当前视频</div>
     <div class="tab" data-tab="history">历史记录</div>
     <div class="tab" data-tab="familiar">已斩词</div>
+    <button type="button" class="diagnostics-button" id="diagnosticsBtn" aria-label="查看诊断信息" title="查看字幕采集和计时信息" aria-controls="diagnosticsPanel" aria-expanded="false">ⓘ</button>
   </div>
 
   <!-- 当前视频 tab -->
@@ -529,6 +604,49 @@
       <button class="btn btn-ghost" id="clearFamiliarBtn" title="清空三个词库共享的已斩词记录">清空所有斩词</button>
     </div>
     <div class="content" id="familiarContent"></div>
+  </div>
+
+  <div class="detail-panel" id="settingsPanel" aria-hidden="true">
+    <section class="detail-box settings-box" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="detail-head">
+        <strong id="settingsTitle">词库与学习模式</strong>
+        <button type="button" class="detail-close" id="settingsClose" aria-label="关闭设置">✕</button>
+      </div>
+      <div class="vocabulary-picker">
+        <div class="vocabulary-row">
+          <label for="vocabularySelect">词库</label>
+          <select id="vocabularySelect" disabled>
+            <option value="cet4">四级</option>
+            <option value="cet6">六级</option>
+            <option value="ielts">雅思（社区学术词表）</option>
+          </select>
+          <a href="vocabulary-sources.html" target="_blank" rel="noopener">词表来源</a>
+        </div>
+        <div class="learning-mode-row">
+          <label for="learningModeSelect">模式</label>
+          <select id="learningModeSelect" disabled>
+            <option value="normal">普通模式</option>
+            <option value="quiz">测试模式</option>
+          </select>
+        </div>
+        <div class="vocabulary-status" id="vocabularyStatus" role="status">正在加载词库…</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="detail-panel" id="diagnosticsPanel" aria-hidden="true">
+    <section class="detail-box diagnostics-box" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
+      <div class="detail-head">
+        <strong id="diagnosticsTitle">字幕与弹窗诊断</strong>
+        <button type="button" class="detail-close" id="diagnosticsClose" aria-label="关闭诊断">✕</button>
+      </div>
+      <div class="diagnostics-state" id="diagnosticsCaptureStatus">等待字幕状态</div>
+      <div class="diagnostics-debug" id="diagnosticsContentDebug"></div>
+      <details class="perf-diagnostics">
+        <summary>本地阶段计时（当前后台进程）</summary>
+        <div class="perf-diagnostics-content" id="perfMetrics">等待样本</div>
+      </details>
+    </section>
   </div>
 
   <!-- 单词详情弹窗 -->

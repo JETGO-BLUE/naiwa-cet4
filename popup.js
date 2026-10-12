@@ -81,6 +81,7 @@ async function init() {
   picker.value = selectedVocabulary;
   learningMode = settings.learningMode === 'quiz' ? 'quiz' : 'normal';
   modePicker.value = learningMode;
+  document.getElementById('settingsOpenBtn').disabled = false;
   quizContextVersion += 1;
   uiError = '';
   currentRecord = null;
@@ -146,8 +147,7 @@ function selectedWords(words) {
 }
 
 function modeWords(words) {
-  const selected = selectedWords(words);
-  return learningMode === 'normal' ? selected.filter((item) => !item.isBasic) : selected;
+  return selectedWords(words).filter((item) => !item.isBasic);
 }
 
 function activeWords(words) {
@@ -164,17 +164,24 @@ function vocabularyTags(categories) {
 
 function renderVocabularyStatus() {
   const status = document.getElementById('vocabularyStatus');
+  if (!status) return;
   status.textContent = uiError || (learningMode === 'quiz'
-    ? '测试模式含基础词；答对仅完成本题，熟悉词请点「斩」'
+    ? '测试模式已隐藏基础词；答对仅完成本题，熟悉词请点「斩」'
     : selectedVocabulary === 'ielts'
     ? '社区学术词表，含 TOEFL 词汇，非官方'
     : '每次选择一个词库，词卡显示全部命中标签');
   status.classList.toggle('error', !!uiError);
 }
 
-function renderCaptureStatus() {
-  const element = document.getElementById('captureStatus');
-  if (!element) return;
+function renderSettingsSummary() {
+  const summary = document.getElementById('settingsSummaryText');
+  if (!summary) return;
+  const vocabulary = VOCABULARY_LABELS[selectedVocabulary] || '四级';
+  const mode = learningMode === 'quiz' ? '测试模式' : '普通模式';
+  summary.textContent = `${vocabulary} · ${mode}`;
+}
+
+function captureStatusMessage() {
   const status = captureState && captureState.status;
   const labels = {
     connecting: '正在连接字幕来源',
@@ -193,8 +200,35 @@ function renderCaptureStatus() {
   if (uiMetric && uiMetric.p95 != null) {
     message += ` · 弹窗更新回调 P95 ${Math.round(uiMetric.p95)} ms（${uiMetric.sampleCount} 次）`;
   }
-  element.textContent = message;
-  element.classList.toggle('error', status === 'error' || status === 'save_failed');
+  return message;
+}
+
+function renderCaptureStatus() {
+  const element = document.getElementById('captureStatus');
+  if (!element) return;
+  const status = captureState && captureState.status;
+  const compactLabels = {
+    connecting: '正在连接字幕',
+    waiting: '等待英文字幕',
+    collecting: '正在收集',
+    saved: '已保存',
+    no_captions: '未找到英文字幕',
+    error: '连接失败',
+    save_failed: '保存失败',
+  };
+  element.textContent = status
+    ? compactLabels[status] || '字幕状态已更新'
+    : (contentAlive === false ? '脚本未连接' : '等待字幕状态');
+  element.dataset.state = status || (contentAlive === false ? 'error' : 'waiting');
+  renderDiagnosticsPanel();
+}
+
+function renderDiagnosticsPanel() {
+  const status = document.getElementById('diagnosticsCaptureStatus');
+  const debug = document.getElementById('diagnosticsContentDebug');
+  if (!status || !debug) return;
+  status.textContent = captureStatusMessage();
+  debug.innerHTML = renderDebug() || '暂无页面字幕容器诊断信息。';
 }
 
 function renderPerformanceMetrics() {
@@ -227,6 +261,7 @@ function renderPerformanceMetrics() {
 // 渲染当前 tab
 function render() {
   renderVocabularyStatus();
+  renderSettingsSummary();
   const titleEl = document.getElementById('videoTitle');
   if (currentRecord) {
     titleEl.textContent = (currentRecord.title || '(无标题)') + (currentRecord.identityConfirmed === false ? ' · 视频身份未确认' : '');
@@ -632,15 +667,51 @@ async function renderHistory() {
   let html = '';
   for (const v of videos) {
     const date = new Date(v.capturedAt).toLocaleString('zh-CN', { hour12: false });
+    const isActivePage = v.videoId === activePageRecordId;
+    const title = v.title || v.videoId;
     html += `
       <div class="video-item" data-video="${escapeHtml(v.videoId)}">
-        <div class="v-title">${escapeHtml(v.title || v.videoId)}</div>
+        <div class="v-item-head">
+          <div class="v-title">${escapeHtml(title)}</div>
+          <button type="button" class="video-delete" data-video="${escapeHtml(v.videoId)}" aria-label="${isActivePage ? '当前页面记录无法删除：' : '删除历史记录：'}${escapeHtml(title)}" title="${isActivePage ? '当前页面仍关联此记录，切换视频或关闭页面后可删除' : '删除这条历史记录'}" ${isActivePage ? 'disabled' : ''}>${isActivePage ? '当前页' : '删除'}</button>
+        </div>
         <div class="v-meta">${activeWords(v.words).length} 个待学词 · ${date}</div>
         ${v.isLegacyVocabulary && selectedVocabulary !== 'cet4' ? '<div class="v-meta">旧记录只含原四级采集结果</div>' : ''}
       </div>`;
   }
   container.innerHTML = html;
   container.scrollTop = oldScrollTop;
+
+  container.querySelectorAll('.video-delete').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) return;
+      const videoId = button.getAttribute('data-video');
+      const video = videos.find((item) => item.videoId === videoId);
+      const title = video && video.title || videoId;
+      if (!window.confirm(`确定删除“${title}”的历史记录吗？删除后无法恢复。`)) return;
+
+      button.disabled = true;
+      const response = await send({ type: 'DELETE_VIDEO', videoId });
+      if (!response.ok) {
+        window.alert('删除失败：' + (response.error || '请重试'));
+        button.disabled = false;
+        return;
+      }
+      if (currentRecordId === videoId) {
+        navigationRequest += 1;
+        quizContextVersion += 1;
+        detailRequest += 1;
+        document.getElementById('detailPanel').classList.remove('open');
+        currentRecord = null;
+        currentRecordId = null;
+        currentVersion = 0;
+        persistedVersion = 0;
+      }
+      await renderHistory();
+    });
+  });
 
   container.querySelectorAll('.video-item').forEach((el) => {
     el.addEventListener('click', async () => {
@@ -1047,6 +1118,62 @@ document.getElementById('detailPanel').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) {
     e.currentTarget.classList.remove('open');
   }
+});
+
+function openPopupPanel(panelId, triggerId, focusId) {
+  const panel = document.getElementById(panelId);
+  const trigger = document.getElementById(triggerId);
+  panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  trigger.setAttribute('aria-expanded', 'true');
+  const focusTarget = document.getElementById(focusId);
+  if (focusTarget && !focusTarget.disabled) focusTarget.focus();
+}
+
+function closePopupPanel(panelId, triggerId) {
+  const panel = document.getElementById(panelId);
+  const trigger = document.getElementById(triggerId);
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.focus();
+}
+
+document.getElementById('settingsOpenBtn').addEventListener('click', () => {
+  openPopupPanel('settingsPanel', 'settingsOpenBtn', 'vocabularySelect');
+});
+document.getElementById('settingsClose').addEventListener('click', () => {
+  closePopupPanel('settingsPanel', 'settingsOpenBtn');
+});
+document.getElementById('diagnosticsBtn').addEventListener('click', () => {
+  renderDiagnosticsPanel();
+  openPopupPanel('diagnosticsPanel', 'diagnosticsBtn', 'diagnosticsClose');
+});
+document.getElementById('diagnosticsClose').addEventListener('click', () => {
+  closePopupPanel('diagnosticsPanel', 'diagnosticsBtn');
+});
+
+for (const [panelId, triggerId] of [
+  ['settingsPanel', 'settingsOpenBtn'],
+  ['diagnosticsPanel', 'diagnosticsBtn'],
+]) {
+  document.getElementById(panelId).addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closePopupPanel(panelId, triggerId);
+  });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  for (const [panelId, triggerId] of [
+    ['settingsPanel', 'settingsOpenBtn'],
+    ['diagnosticsPanel', 'diagnosticsBtn'],
+  ]) {
+    if (document.getElementById(panelId).classList.contains('open')) {
+      closePopupPanel(panelId, triggerId);
+      return;
+    }
+  }
+  document.getElementById('detailPanel').classList.remove('open');
 });
 
 // 启动
