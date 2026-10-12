@@ -80,7 +80,7 @@
       <p class="sub">奶娃过四级 · Naiwa CET-4 Collector</p>
     </div>
   </header>
-  <div class="meta">最后更新：2026 年 10 月 10 日</div>
+  <div class="meta">最后更新：2026 年 10 月 12 日</div>
 
   <div class="card">
     <div class="lang-tag">中文版</div>
@@ -91,20 +91,22 @@
     </div>
 
     <ol>
-      <li><strong>字幕文本</strong>：本扩展读取当前视频页面上<strong>已显示</strong>的字幕文字，用于在<strong>你的浏览器本地</strong>提取其中的四级词汇。字幕文本<strong>不会</strong>被上传到任何服务器（本扩展没有服务器）。</li>
+      <li><strong>字幕文本</strong>：沉浸式翻译和页面可读取的标准英文字幕在浏览器本地处理。YouTube 原生字幕兜底会向 YouTube 请求所选英文字幕轨，可能下载整条字幕并包含尚未播放的部分。我们没有服务器，字幕不会上传给本扩展运营方；YouTube 请求仍受其自身服务条款和隐私政策约束。</li>
       <li><strong>单词查询</strong>：当你<strong>主动点击</strong>某个单词查看释义时，该单词会被发送至以下公开词典接口：
         <ul>
           <li><code>api.dictionaryapi.dev</code>（Free Dictionary API）</li>
           <li><code>en.wiktionary.org</code>（维基词典）</li>
         </ul>
-        发送的内容<strong>仅为该单词本身</strong>，不包含页面地址、视频内容、设备信息或任何身份标识。
+        查询词会出现在请求地址中；扩展不会附带当前视频字幕或视频页面地址。第三方服务可能按其政策处理请求和常规网络元数据。
       </li>
-      <li><strong>本地设置</strong>：你标记为「已斩」（熟悉词）的单词列表、以及已收集的词汇记录，全部保存在浏览器本地存储（<code>chrome.storage.local</code>）中，<strong>不会离开你的设备</strong>，我们无法读取。</li>
+      <li><strong>测试题与朗读</strong>：测试题数据随扩展本地打包，选择和判分在本地完成。单词朗读只使用浏览器标记为本地服务的英语音色；没有可用音色时扩展会提示，不会选择远程音色。</li>
+      <li><strong>本地设置和记录</strong>：所选词库、学习模式、熟悉词、匹配词卡、时间点和历史记录保存在浏览器本地存储（<code>chrome.storage.local</code>）。原始字幕不会作为长期记录保存。页面仍打开时，尚未获得本地保存确认的短期输入缓存保留在页面内存中；页面与浏览器同时突然关闭前的最后一小段未确认输入可能丢失。</li>
+      <li><strong>本地计时</strong>：字幕回调、匹配、保存和弹窗更新耗时可保存在本地内存中用于调试，不上传遥测或分析。</li>
     </ol>
 
     <h2>二、我们不做什么</h2>
     <ul class="no">
-      <li>❌ 不收集浏览历史</li>
+      <li>❌ 不读取或上传浏览器浏览记录；扩展只在本地保存自己采集过的视频记录</li>
       <li>❌ 不收集个人身份信息（姓名、邮箱、电话等）</li>
       <li>❌ 不使用 Cookie 追踪</li>
       <li>❌ 不植入广告</li>
@@ -118,16 +120,17 @@
       <tbody>
         <tr><td><code>storage</code></td><td>在本地保存你标记的「已斩词」和词汇记录</td></tr>
         <tr><td><code>tabs</code></td><td>与当前视频页面通信，获取已收集的字幕词汇</td></tr>
-        <tr><td><code>主机权限</code></td><td>读取视频页面上显示的字幕文字（含「沉浸式翻译」等翻译扩展渲染的双语字幕）</td></tr>
+        <tr><td><code>主机权限</code></td><td>在匹配的视频页面读取可见字幕和可访问的标准 TextTrack，并向 YouTube 请求当前视频的字幕轨</td></tr>
       </tbody>
     </table>
 
     <h2>四、数据安全</h2>
-    <p>所有字幕处理均在本地完成。唯一的对外网络请求是你主动点击单词时的词典查询，且仅发送单词本身。</p>
+    <p>字幕匹配和历史记录合并在本地完成。对外网络请求包括 YouTube 原生字幕兜底所需的字幕轨请求，以及你主动点击单词时发起的词典查询。标准字幕轨与沉浸式翻译文本不上传。</p>
 
     <h2>五、第三方服务</h2>
     <p>本扩展使用以下公开服务，其数据处理受各自隐私政策约束：</p>
     <ul>
+      <li>YouTube — 原生英文字幕兜底按当前播放器提供的字幕轨地址请求内容，可能请求整条字幕轨。<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">YouTube 隐私政策</a></li>
       <li>Free Dictionary API — <a href="https://dictionaryapi.dev/" target="_blank" rel="noopener">dictionaryapi.dev</a></li>
       <li>Wiktionary — <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener">Wikimedia Privacy Policy</a></li>
     </ul>
@@ -153,14 +156,16 @@
     </div>
 
     <ol>
-      <li><strong>Subtitle text</strong>: This extension reads subtitle text already displayed on the video page to extract CET-4 vocabulary <strong>locally in your browser</strong>. Subtitle text is <strong>never</strong> uploaded to any server of ours (we have no server).</li>
-      <li><strong>Word lookups</strong>: When you <strong>manually click</strong> a word to view its definition, that word alone is sent to public dictionary APIs (<code>api.dictionaryapi.dev</code>, <code>en.wiktionary.org</code>). No page URL, video content, device information, or identifiers are included.</li>
-      <li><strong>Local settings</strong>: Your "slashed" (familiar) word list and collected vocabulary records are stored locally via <code>chrome.storage.local</code> and <strong>never leave your device</strong>.</li>
+      <li><strong>Subtitle text</strong>: Immersive Translate and readable standard English text tracks are processed locally. The YouTube native-caption fallback requests the selected English caption track from YouTube and may download the entire track, including unplayed sections. We have no server; subtitles are not uploaded to the extension operator. YouTube requests remain subject to YouTube's own terms and privacy policy.</li>
+      <li><strong>Word lookups</strong>: When you manually click a word, the query appears in requests to <code>api.dictionaryapi.dev</code> and, if needed, <code>en.wiktionary.org</code>. The extension does not include the current video's subtitles or page URL. Those services may process the request and ordinary network metadata under their policies.</li>
+      <li><strong>Quiz and speech</strong>: Quiz data is bundled with the extension and answers are checked locally. Speech uses only English voices that the browser identifies as local services; if none are available, the extension displays a notice and does not select a remote voice.</li>
+      <li><strong>Local settings and records</strong>: Your selected vocabulary, learning mode, familiar-word list, matched word cards, timestamps, and history are stored in <code>chrome.storage.local</code>. Raw subtitles are not kept as long-term records. While the page remains open, unconfirmed input is held temporarily in page memory; the last unconfirmed portion may be lost if the page and browser close unexpectedly at the same time.</li>
+      <li><strong>Local timing</strong>: Capture, matching, saving, and popup-update timings may be kept in local memory for debugging. They are not uploaded as telemetry or analytics.</li>
     </ol>
 
     <h2>2. What We Do Not Do</h2>
     <ul class="no">
-      <li>❌ No browsing history collection</li>
+      <li>❌ Does not read or upload browser browsing history; it keeps only its own captured-video records locally</li>
       <li>❌ No personal information collection</li>
       <li>❌ No tracking cookies</li>
       <li>❌ No advertising</li>
@@ -174,15 +179,16 @@
       <tbody>
         <tr><td><code>storage</code></td><td>Save your slashed words and vocabulary records locally</td></tr>
         <tr><td><code>tabs</code></td><td>Communicate with the current video page to retrieve collected words</td></tr>
-        <tr><td><code>Host permissions</code></td><td>Read subtitle text displayed on video pages (including bilingual subtitles rendered by translation extensions such as Immersive Translate)</td></tr>
+        <tr><td><code>Host permissions</code></td><td>Read visible subtitles and accessible standard text tracks on matching video pages, and request the current video's subtitle track from YouTube</td></tr>
       </tbody>
     </table>
 
     <h2>4. Data Security</h2>
-    <p>All subtitle processing is done locally. The only outbound network request is a dictionary lookup when you click a word, sending only the word itself.</p>
+    <p>Subtitle matching and history merging are done locally. Outbound requests include YouTube caption-track retrieval for the native fallback and dictionary lookups after a manual word click. Immersive Translate text and standard text tracks are not uploaded.</p>
 
     <h2>5. Third-Party Services</h2>
     <ul>
+      <li>YouTube — the native English-caption fallback requests the current player's caption track and may retrieve the full track. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">YouTube Privacy Policy</a></li>
       <li>Free Dictionary API — <a href="https://dictionaryapi.dev/" target="_blank" rel="noopener">dictionaryapi.dev</a></li>
       <li>Wiktionary — <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener">Wikimedia Privacy Policy</a></li>
     </ul>

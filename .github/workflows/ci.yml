@@ -20,6 +20,11 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: 校验 manifest.json 与词表 JSON 格式
         run: |
           node -e "
@@ -37,10 +42,14 @@ jobs:
           console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
 
           // ---- 扩展必需文件 ----
-          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json','quiz_bank.json'];
+          const required = ['background.js','content.js','youtube-bridge.js','popup.html','popup.js','cet4_words.json','cet6_words.json','ielts_words.json','quiz_bank.json','quiz_extras.json','quiz-sources.json','vocabulary-sources.json','vocabulary-sources.html','licenses/cet6-LICENSE.txt','licenses/ielts-LICENSE.txt','licenses/ecdict-LICENSE.txt','licenses/CC-BY-SA-4.0.txt','scripts/build-quiz-extras.py','scripts/validate-quiz-data.py','scripts/test-subtitle-pipeline.js'];
           for (const f of required) {
             if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
           }
+          const bridge = m.content_scripts.find((entry) => (entry.js || []).includes('youtube-bridge.js'));
+          if (!bridge || bridge.world !== 'MAIN' || bridge.run_at !== 'document_start' ||
+              bridge.matches.some(pattern => !pattern.includes('youtube.com'))) fail('YouTube bridge 必须仅匹配 YouTube 并运行在 MAIN/document_start');
+          if (Number(m.minimum_chrome_version) < 111) fail('MAIN world content script 要求 minimum_chrome_version 至少为 111');
           console.log('✅ 必需文件齐全: ' + required.join(', '));
 
           // ---- 图标 ----
@@ -50,38 +59,36 @@ jobs:
           console.log('✅ 图标齐全: ' + Object.values(m.icons).join(', '));
 
           // ---- 词表 ----
-          const w = JSON.parse(fs.readFileSync('cet4_words.json', 'utf8'));
-          const n = Object.keys(w).length;
-          if (n < 1000) fail('词表条目过少，可能文件损坏: ' + n);
-          console.log('✅ cet4_words.json 合法  共 ' + n + ' 个词条');
-
-          // ---- 题库 quiz_bank.json ----
-          const q = JSON.parse(fs.readFileSync('quiz_bank.json', 'utf8'));
-          const qn = Object.keys(q).length;
-          if (qn < 1000) fail('题库条目过少，可能文件损坏: ' + qn);
-          let badQ = 0;
-          for (const [word, ds] of Object.entries(q)) {
-            if (!Array.isArray(ds) || ds.length !== 3 || new Set(ds).size !== 3) { badQ++; continue; }
-            if (ds.includes(word)) { badQ++; continue; }
-            const means = new Set([w[word]]);
-            let okD = true;
-            for (const d of ds) {
-              if (!w[d]) { okD = false; break; }
-              means.add(w[d]);
+          const sources = JSON.parse(fs.readFileSync('vocabulary-sources.json', 'utf8')).sources;
+          for (const category of ['cet4','cet6','ielts']) {
+            const file = category + '_words.json';
+            const bytes = fs.readFileSync(file);
+            const w = JSON.parse(bytes.toString('utf8'));
+            const n = Object.keys(w).length;
+            if (!w || Array.isArray(w) || n < 1000 || Object.values(w).some(v => typeof v !== 'string')) fail('词表格式或条目数异常: ' + file);
+            if (sources[category]) {
+              const hash = require('crypto').createHash('sha256').update(bytes).digest('hex');
+              if (n !== sources[category].count || hash !== sources[category].output_sha256) fail('词表与来源记录不一致: ' + file);
             }
-            if (!okD || means.size !== 4) badQ++;
+            console.log('✅ ' + file + ' 合法  共 ' + n + ' 个词条');
           }
-          if (badQ > 0) fail('题库有 ' + badQ + ' 个词条不合法（干扰项数量 / 重复 / 释义撞车）');
-          console.log('✅ quiz_bank.json 合法  共 ' + qn + ' 个词条，均为 3 个干扰项且 4 条释义互不相同');
 
           // ---- background.js 语法检查 ----
           new (require('vm').Script)(fs.readFileSync('background.js','utf8'));
           console.log('✅ background.js 语法正确');
           new (require('vm').Script)(fs.readFileSync('content.js','utf8'));
           console.log('✅ content.js 语法正确');
+          new (require('vm').Script)(fs.readFileSync('youtube-bridge.js','utf8'));
+          console.log('✅ youtube-bridge.js 语法正确');
           new (require('vm').Script)(fs.readFileSync('popup.js','utf8'));
           console.log('✅ popup.js 语法正确');
 
           console.log('');
           console.log('🎉 全部检查通过');
           "
+
+      - name: 合并、重发、恢复和竞争写入 Mock 验证
+        run: node scripts/test-subtitle-pipeline.js
+
+      - name: 三词库题库覆盖、结构、来源与许可校验
+        run: python scripts/validate-quiz-data.py

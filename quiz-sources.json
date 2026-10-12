@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "retrieved_on": "2026-10-12",
+  "overall_question_coverage": {
+    "unique_vocabulary_heads": 6043,
+    "question_count": 6043,
+    "by_vocabulary": {
+      "cet4": {
+        "total": 4590,
+        "covered": 4590,
+        "missing": 0
+      },
+      "cet6": {
+        "total": 2219,
+        "covered": 2219,
+        "missing": 0
+      },
+      "ielts": {
+        "total": 1000,
+        "covered": 1000,
+        "missing": 0
+      }
+    },
+    "missing_items": []
+  },
+  "upstream_quiz_bank": {
+    "source_url": "https://github.com/JETGO-BLUE/naiwa-cet4/blob/ea6f10676e923d3a3a5d3bd4e848942319bda170/quiz_bank.json",
+    "source_commit": "ea6f10676e923d3a3a5d3bd4e848942319bda170",
+    "retrieved_on": "2026-10-12",
+    "file": "quiz_bank.json",
+    "sha256": "08ea1f69bc0c28de8596d54292bcbdd2129db2996eb18a99fffa57f332a4c4e8",
+    "coverage_count": 4590,
+    "license": "MIT repository license; retained unchanged",
+    "license_url": "https://github.com/JETGO-BLUE/naiwa-cet4/blob/ea6f10676e923d3a3a5d3bd4e848942319bda170/LICENSE",
+    "license_file": "LICENSE",
+    "license_source_sha256": "28dc702df2bc1232120917d755a735e567ceaa62f7940f911338e1b56ce00311",
+    "license_file_sha256": "6129297393fae7afe50ee1c0d58f6f5b4c3c3f8f341fddeacde8aa59780a9843",
+    "attribution": "JETGO-BLUE / upstream naiwa-cet4 contributors; source file retained unchanged",
+    "missing_items": [],
+    "changes": "保留上游四级题库原文件；运行时通过 cet4_words.json 生成选项。",
+    "known_duplicate_gloss_rows": [
+      "cigar",
+      "mysterious"
+    ],
+    "runtime_repair_count": 2,
+    "runtime_repair": "上游这两条题目中两个干扰词释义相同；保留原文件，运行时确定性地替换重复释义，并优先选择同词性的 CET4 释义。"
+  },
+  "ecdict": {
+    "source_url": "https://github.com/skywind3000/ECDICT/blob/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+    "repository": "https://github.com/skywind3000/ECDICT",
+    "source_commit": "bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
+    "retrieved_on": "2026-10-12",
+    "source_file": "ecdict.csv",
+    "source_sha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+    "license": "MIT (repository license declaration)",
+    "license_url": "https://github.com/skywind3000/ECDICT/blob/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/LICENSE",
+    "license_file_sha256": "f8552dd246f61a4e064569eae6194a01c6b3d63b03bf27c6ca863593c549ed0f",
+    "attribution": "Linwei (Copyright 2025; see the included ECDICT LICENSE)",
+    "license_scope_note": "ECDICT 仓库对本仓库声明 MIT，但 README 描述其为多来源汇编，未给每行记录上游出处；本项目依据仓库声明复用并保留此溯源限制。",
+    "readme_url": "https://github.com/skywind3000/ECDICT/blob/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/README.md",
+    "output_file": "quiz_extras.json",
+    "output_sha256": "d7beb86ccdbead27704f992454558901849a7111f7202000a8be95f81a3eba4a",
+    "coverage_count": 1452,
+    "generated_question_count": 1452,
+    "missing_items": [
+      "inasmuchas：ECDICT 未提供该历史词头，使用下方 Wiktionary 短语来源修正"
+    ],
+    "provenance_note": "ECDICT README describes a multi-source compilation; source is pinned and the declared MIT notice is included, but individual historical upstream origins are not recorded per row.",
+    "changes": "仅为已有四级题库未覆盖的词取中文 translation 字段首条带词性的中文释义；按词性从三词库并集中选取三个释义，去重并以共享汉字比例限制表面相似；题目由脚本整理生成，未经逐题人工复核。",
+    "distractor_quality": {
+      "generated_questions": 1452,
+      "part_of_speech_fallbacks": 1,
+      "high_overlap_questions": 0,
+      "structural_validation": "四项齐全、释义非空且规范化后不重复；不等同于人工语义审校。"
+    }
+  },
+  "inasmuchas_compatibility": {
+    "legacy_headword": "inasmuchas",
+    "caption_phrase": "inasmuch as",
+    "meaning": "因为；鉴于；由于",
+    "source_revision": 91768332,
+    "coverage_count": 1,
+    "source_url": "https://en.wiktionary.org/wiki/inasmuch_as",
+    "source_snapshot_url": "https://en.wiktionary.org/w/api.php?action=query&revids=91768332&prop=revisions&rvprop=ids%7Ccontent&rvslots=main&format=json",
+    "source_snapshot_sha256": "8b2d11955cc46163c87841293da822d1795ee44e0b3d8d3b4e1e7e8a15c8b034",
+    "retrieved_on": "2026-10-12",
+    "attribution": "English Wiktionary contributors, page ‘inasmuch as’, revision 91768332",
+    "license": "CC-BY-SA-4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "license_file": "licenses/CC-BY-SA-4.0.txt",
+    "license_file_sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5",
+    "translation_note": "据英文释义 ‘Because of the fact that; since’ 整理中文译义；保留字幕历史词头并将标准短语映射到它。",
+    "missing_items": []
+  }
+}

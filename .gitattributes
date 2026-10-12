@@ -1,0 +1,3 @@
+# Keep generated vocabulary bytes stable for the recorded SHA-256 hashes.
+cet6_words.json text eol=lf
+ielts_words.json text eol=lf

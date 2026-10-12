@@ -1,25 +1,109 @@
-// background.js —— service worker：字幕分词/四级匹配/词形还原/联网查词/存储
+// background.js —— service worker：字幕分词/多词库匹配/词形还原/联网查词/存储
 
 'use strict';
 
-// ============ 1. 四级词表加载 ============
-let CET4 = null;
-async function loadCET4() {
-  if (CET4) return CET4;
-  try {
-    const url = chrome.runtime.getURL('cet4_words.json');
-    const resp = await fetch(url);
-    CET4 = await resp.json();
-    console.log('[YT-CET4] 四级词表加载完成，共', Object.keys(CET4).length, '词');
-    return CET4;
-  } catch (e) {
-    console.error('[YT-CET4] 词表加载失败', e);
-    CET4 = {};
-    return CET4;
+// ============ 1. 本地词表加载 ============
+const VOCABULARIES = ['cet4', 'cet6', 'ielts'];
+const LEARNING_MODES = ['normal', 'quiz'];
+let WORD_INDEX = null;
+let vocabularyLoad = null;
+let vocabularyLoadDurationMs = null;
+async function loadVocabularies() {
+  if (WORD_INDEX) return WORD_INDEX;
+  if (!vocabularyLoad) {
+    vocabularyLoad = (async () => {
+      const loadStartedAt = Date.now();
+      const maps = await Promise.all(VOCABULARIES.map(async (category) => {
+        const response = await fetch(chrome.runtime.getURL(category + '_words.json'));
+        if (!response.ok) throw new Error(category + ' 词表加载失败，请重新加载扩展');
+        const map = await response.json();
+        if (!map || Array.isArray(map) || typeof map !== 'object' || !Object.keys(map).length ||
+            Object.values(map).some((meaning) => typeof meaning !== 'string')) {
+          throw new Error(category + ' 词表格式错误');
+        }
+        return map;
+      }));
+      const index = Object.create(null);
+      maps.forEach((map, i) => {
+        for (const [word, meaning] of Object.entries(map)) {
+          if (!index[word]) index[word] = { meaning: '', categories: [] };
+          index[word].categories.push(VOCABULARIES[i]);
+          if (!index[word].meaning && meaning) index[word].meaning = meaning;
+        }
+      });
+      WORD_INDEX = index;
+      vocabularyLoadDurationMs = Date.now() - loadStartedAt;
+      return index;
+    })().catch((error) => {
+      vocabularyLoad = null; // 修复文件后允许重试，避免把失败当成空词表。
+      throw error;
+    });
   }
+  return vocabularyLoad;
 }
 
-// ============ 2. 词形还原（强化版） ============
+// ============ 2. 基础词过滤 ============
+// 词表保留完整内容；只在返回给界面时隐藏这些过于基础的词及其变形。
+const BASIC_WORDS = new Set(
+  `a an the i you he she it we they me him her us them
+my your his its our their mine yours hers ours theirs
+this that these those and or but so if as
+to of in on at for from with by
+be go have do get come take make say see know think
+can could may might must shall should will would
+not no yes very`.split(/\s+/)
+);
+
+function isBasicWord(word, lemma) {
+  return BASIC_WORDS.has(String(word || '').toLowerCase()) ||
+    BASIC_WORDS.has(String(lemma || '').toLowerCase());
+}
+
+async function filterRecordForDisplay(record) {
+  if (!record) return null;
+  const index = await loadVocabularies();
+  const recordId = record.recordId || record.videoId || '';
+  // 旧记录只补已有词的标签，不回写原始记录，也不假造未采集的词。
+  // 普通/测试模式过滤只发生在 popup 展示层；基础词始终留在原始数据中。
+  const words = (record.words || []).map((item) => {
+    const match = matchVocabulary(item.word, index);
+    const lemma = match ? match.lemma : item.lemma || item.word;
+    return {
+      ...item,
+      lemma: match ? match.lemma : item.lemma,
+      meaning: match ? match.meaning || item.meaning || '' : item.meaning || '',
+      categories: match ? match.categories : item.categories || [],
+      isBasic: isBasicWord(item.word, lemma),
+    };
+  });
+  return {
+    ...record,
+    recordId: recordId,
+    identityConfirmed: record.identityConfirmed == null
+      ? !/^p[0-9a-z]{1,8}$/.test(recordId)
+      : record.identityConfirmed !== false,
+    words: words,
+    totalWords: words.length,
+    isLegacyVocabulary: !record.vocabularyVersion,
+  };
+}
+
+async function getFamiliarWordsForDisplay() {
+  const data = await chrome.storage.local.get('familiarWords');
+  const index = await loadVocabularies();
+  const entries = (data.familiarWords || []).map((word) => matchVocabulary(word, index))
+    .filter(Boolean)
+    .map((match) => ({
+      word: match.surface,
+      lemma: match.lemma,
+      meaning: match.meaning,
+      categories: match.categories,
+      isBasic: isBasicWord(match.surface, match.lemma),
+    }));
+  return { familiar: entries.map((item) => item.word), familiarEntries: entries };
+}
+
+// ============ 3. 词形还原（强化版） ============
 // 不规则动词完整表
 const IRREGULAR = {
   // be
@@ -63,180 +147,678 @@ const IRREGULAR = {
 // 规则还原（用词表查证兜底，避免误还原）
 function lemmatize(word) {
   const w = word.toLowerCase();
+  if (WORD_INDEX && WORD_INDEX[w]) return w;
   if (IRREGULAR[w]) return IRREGULAR[w];
+  for (const [lemma, plural] of Object.entries(IRREG_NOUN)) {
+    if (plural === w && WORD_INDEX && WORD_INDEX[lemma]) return lemma;
+  }
   const L = w.length;
-
-  // 优先用词表验证：如果原词就在词表，直接返回
-  if (CET4 && CET4[w]) return w;
-
-  // -ies -> -y （studies -> study）
-  if (L > 4 && w.endsWith('ies')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
+  const candidates = [];
+  if (w.endsWith("'s")) candidates.push(w.slice(0, -2));
+  if (L > 4 && /(?:ies|ied)$/.test(w)) candidates.push(w.slice(0, -3) + 'y');
+  if (L > 3 && w.endsWith('es')) candidates.push(w.slice(0, -2), w.slice(0, -1));
+  if (L > 3 && w.endsWith('s') && !/(?:ss|us|is|ous)$/.test(w)) candidates.push(w.slice(0, -1));
+  for (const suffix of ['ing', 'ed', 'er', 'est']) {
+    if (L <= suffix.length + 2 || !w.endsWith(suffix)) continue;
+    const stem = w.slice(0, -suffix.length);
+    candidates.push(stem, stem + 'e');
+    if (stem.endsWith('i')) candidates.push(stem.slice(0, -1) + 'y');
+    if (stem.length > 2 && stem.at(-1) === stem.at(-2)) candidates.push(stem.slice(0, -1));
   }
-  // -es：分两种情况
-  if (L > 3 && w.endsWith('es')) {
-    const base = w.slice(0, -2); // 去掉 es
-    // 先试 "去 es" 后的形式（boxes -> box）
-    if (CET4 && CET4[base]) return base;
-    // 再试 "去 s"（makes -> make，其实是 make 的 s）
-    const base2 = w.slice(0, -1); // 去掉 s
-    if (CET4 && CET4[base2]) return base2;
-    // 补 e（makes -> make）
-    const baseE = base + 'e';
-    if (CET4 && CET4[baseE]) return baseE;
-    return base;
-  }
-  // -s -> 去掉（复数/三单）
-  if (L > 3 && w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && !w.endsWith('is') && !w.endsWith('ous')) {
-    const cand = w.slice(0, -1);
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // -ing
-  if (L > 5 && w.endsWith('ing')) {
-    let stem = w.slice(0, -3);
-    if (stem.length > 2 && stem[stem.length-1] === stem[stem.length-2]) {
-      stem = stem.slice(0, -1); // running -> run
-    }
-    const candidates = [stem, stem + 'e'];
-    for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
-    }
-    return stem;
-  }
-  // -ied -> -y （studied -> study）
-  if (L > 4 && w.endsWith('ied')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // -ed
-  if (L > 4 && w.endsWith('ed')) {
-    let stem = w.slice(0, -2);
-    if (stem.length > 2 && stem[stem.length-1] === stem[stem.length-2]) {
-      stem = stem.slice(0, -1); // stopped -> stop
-    }
-    const candidates = [stem, stem + 'e'];
-    for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
-    }
-    return stem;
-  }
-  // -er 比较级（happier -> happy, bigger -> big）
-  if (L > 4 && w.endsWith('er') && w.endsWith('ier') === false) {
-    const base = w.slice(0, -2);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
-  }
-  // -ier -> -y（happier -> happy）
-  if (L > 4 && w.endsWith('ier')) {
-    const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
-    return cand;
-  }
-  // 双写+er（bigger -> big）
-  if (L > 5 && w.endsWith('er') && w[w.length-3] === w[w.length-4]) {
-    const cand = w.slice(0, -3);
-    if (CET4 && CET4[cand]) return cand;
-  }
-  // -est 最高级
-  if (L > 5 && w.endsWith('est')) {
-    const base = w.slice(0, -3);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
-    if (base.endsWith('i')) return base.slice(0, -1) + 'y'; // happiest -> happy
+  for (const candidate of candidates) {
+    if (WORD_INDEX && WORD_INDEX[candidate]) return candidate;
   }
   return w;
 }
 
-// ============ 3. 四级词匹配（返回原词 + 匹配到的四级词根） ============
-// 匹配：先直接命中，再还原后命中。返回 { surface: 原词, lemma: 词根, meaning }
-function matchCET4(word, cet4Map) {
+// ============ 3. 多词库匹配（一次返回全部命中类别） ============
+const WORD_ALIASES = Object.freeze({
+  'inasmuch as': 'inasmuchas',
+  inasmuchas: 'inasmuchas',
+});
+const MEANING_OVERRIDES = Object.freeze({
+  inasmuchas: '由于；鉴于；因为（字幕短语：inasmuch as）',
+});
+
+function matchVocabulary(word, index) {
   const w = word.toLowerCase();
-  if (cet4Map[w]) return { surface: w, lemma: w, meaning: cet4Map[w] };
-  const lemma = lemmatize(w);
-  if (lemma !== w && cet4Map[lemma]) {
-    return { surface: w, lemma: lemma, meaning: cet4Map[lemma] };
-  }
-  return null;
+  const lookup = WORD_ALIASES[w] || w;
+  const lemma = index[lookup] ? lookup : lemmatize(lookup);
+  return index[lemma] ? {
+    surface: w,
+    lemma: lemma,
+    ...index[lemma],
+    meaning: MEANING_OVERRIDES[lemma] || index[lemma].meaning,
+  } : null;
 }
 
-// 从一条字幕提取四级词，返回原样 surface 词
-function extractCET4Words(text, cet4Map) {
+// 从一条字幕提取词库并集，保留 surface 和连字符词。
+function extractVocabularyWords(text, index) {
   const found = new Set();
-  const tokens = text.toLowerCase().split(/[^a-z']+/).filter(Boolean);
+  let normalized = text.toLowerCase().replace(/’/g, "'");
+  // 兼容雅思来源中的历史词头 inasmuchas；字幕中的正常短语映射回旧词头。
+  for (const phrase of ['inasmuch as']) {
+    const matcher = /\binasmuch\s+as\b/g;
+    if (matcher.test(normalized)) found.add(phrase);
+    normalized = normalized.replace(matcher, ' ');
+  }
+  const tokens = normalized.match(/[a-z]+(?:['-][a-z]+)*/g) || [];
   for (const tok of tokens) {
-    const clean = tok.replace(/^'+|'+$/g, '');
-    if (clean.length < 2) continue;
-    const m = matchCET4(clean, cet4Map);
-    if (m) found.add(m.surface); // 保留字幕原样
+    const parts = matchVocabulary(tok, index) ? [tok] : tok.split('-');
+    for (const part of parts) {
+      if (part.length < 1) continue;
+      const match = matchVocabulary(part, index);
+      if (match) found.add(match.surface);
+    }
   }
   return Array.from(found);
 }
 
 // 时间格式化
 function fmtTime(sec) {
-  sec = Math.floor(sec);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m + ':' + String(s).padStart(2, '0');
+  const rounded = Math.max(0, Math.round(Number(sec) * 10) / 10);
+  const whole = Math.floor(rounded);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  const tenth = Math.round((rounded - whole) * 10);
+  return m + ':' + String(s).padStart(2, '0') + (tenth ? '.' + tenth : '');
 }
 
 // ============ 4. 字幕处理 ============
-const MAX_TIMES = 10;        // 每个词最多保留 10 个时间点
-const TIME_BUCKET_SEC = 180; // 时间点按「每 3 分钟」记录一次（3*60 秒一个区）
+const MAX_TIMES = 10; // 每个词最多保留前 10 个时间点
 
-async function processCaptions(msg) {
-  const cet4Map = await loadCET4();
-  const { videoId, title, cues } = msg;
+// Records are cached only while actively used/dirty. The worker may stop at any
+// time; the page keeps unconfirmed events and re-sends them after reconnection.
+const RECORD_SAVE_DELAY_MS = 500;
+const RECORD_SAVE_MAX_WAIT_MS = 1000;
+const MAX_SAVE_RETRIES = 3;
+const MAX_CACHED_RECORDS = 32;
+const MAX_EVENT_IDS = 2048;
+const recordEntries = new Map();
+const recordLoads = new Map();
+const deletingRecords = new Set();
+const perfSamples = [];
+const MAX_PERF_SAMPLES = 256;
 
-  const wordMap = new Map(); // surface -> { meaning, lemma, buckets }
+function nowEpoch() {
+  return typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
+    ? performance.timeOrigin + performance.now()
+    : Date.now();
+}
 
-  for (const cue of cues) {
-    const words = extractCET4Words(cue.text, cet4Map);
-    const bucket = Math.floor(cue.start / TIME_BUCKET_SEC); // 落在第几个 3 分钟区
-    for (const surface of words) {
-      const m = matchCET4(surface, cet4Map);
-      if (!wordMap.has(surface)) {
-        wordMap.set(surface, {
-          meaning: m ? m.meaning : '',
-          lemma: m ? m.lemma : surface,
-          buckets: new Set(),
-        });
+function recordKey(recordId) {
+  return 'video_' + recordId;
+}
+
+function validRecordId(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+}
+
+function addPerfSample(sample) {
+  perfSamples.push(sample);
+  if (perfSamples.length > MAX_PERF_SAMPLES) perfSamples.shift();
+}
+
+function percentile(values, pct) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * pct) - 1)];
+}
+
+function getPerfSummary() {
+  const metric = (field) => {
+    const values = perfSamples.filter((item) => Number.isFinite(item[field])).map((item) => item[field]);
+    return { sampleCount: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) };
+  };
+  return {
+    captureToPopup: metric('captureToPopupMs'),
+    captureToBackground: metric('inputLagMs'),
+    match: metric('matchMs'),
+    normalIncrementalMatch: metricForSource('matchMs', 'youtube-native', false),
+    youtubeNativeMatch: metricForSource('matchMs', 'youtube-native', true),
+    captureToSave: metric('captureToSaveMs'),
+    save: metric('saveMs'),
+    recordRestore: metric('recordRestoreMs'),
+    youtubeCaptionFetch: metric('youtubeFetchMs'),
+    vocabularyColdStartMs: vocabularyLoadDurationMs,
+    clock: '跨上下文 epoch 毫秒；受浏览器时间精度限制，按回调采集起点计时',
+  };
+}
+
+function metricForSource(field, source, matchesSource) {
+  const values = perfSamples.filter((item) => Number.isFinite(item[field]) &&
+    ((item.source === source) === matchesSource)).map((item) => item[field]);
+  return { sampleCount: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) };
+}
+
+function cloneRecord(record) {
+  return JSON.parse(JSON.stringify(record));
+}
+
+function parseTimeSeconds(value) {
+  const match = String(value || '').match(/^(\d+):(\d{2})(?:\.(\d))?$/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) + Number('0.' + (match[3] || '0')) : null;
+}
+
+function cleanRecord(record, recordId) {
+  const base = record && typeof record === 'object' ? record : {};
+  return {
+    ...base,
+    videoId: recordId,
+    recordId: recordId,
+    title: base.title || '',
+    words: Array.isArray(base.words) ? base.words : [],
+    totalWords: Array.isArray(base.words) ? base.words.length : 0,
+    capturedAt: Number(base.capturedAt) || 0,
+    version: Number(base.version) || 0,
+    identityConfirmed: base.identityConfirmed == null
+      ? !/^p[0-9a-z]{1,8}$/.test(recordId)
+      : base.identityConfirmed !== false,
+    processedEventIds: Array.isArray(base.processedEventIds) ? base.processedEventIds.slice(-MAX_EVENT_IDS) : [],
+    vocabularyVersion: base.vocabularyVersion || 1,
+  };
+}
+
+function trimRecordCache() {
+  while (recordEntries.size > MAX_CACHED_RECORDS) {
+    let removed = false;
+    for (const [recordId, entry] of recordEntries) {
+      if (entry.saveTimer || entry.savePromise || entry.dirty || entry.mergePromise) continue;
+      recordEntries.delete(recordId);
+      removed = true;
+      break;
+    }
+    if (!removed) break;
+  }
+}
+
+async function getRecordEntry(recordId) {
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+  if (recordEntries.has(recordId)) {
+    const entry = recordEntries.get(recordId);
+    recordEntries.delete(recordId);
+    recordEntries.set(recordId, entry);
+    return entry;
+  }
+  if (recordLoads.has(recordId)) return recordLoads.get(recordId);
+  const loading = (async () => {
+    trimRecordCache();
+    if (recordEntries.size >= MAX_CACHED_RECORDS) {
+      throw new Error('采集队列已满，先等待本地保存完成再继续。');
+    }
+    const key = recordKey(recordId);
+    const restoreStartedAt = Date.now();
+    const data = await chrome.storage.local.get(key);
+    addPerfSample({ recordRestoreMs: Date.now() - restoreStartedAt });
+    const record = cleanRecord(data[key], recordId);
+    const wordIndex = new Map(record.words.map((word) => [String(word.word || '').toLowerCase(), word]));
+    const processedEventIds = new Set(record.processedEventIds);
+    const entry = {
+      recordId,
+      key,
+      record,
+      wordIndex,
+      version: record.version,
+      persistedVersion: record.version,
+      dirty: false,
+      dirtySince: 0,
+      saveTimer: null,
+      savePromise: null,
+      saveRetries: 0,
+      retryDelay: 0,
+      savePaused: false,
+      mergePromise: null,
+      processedEventIds,
+      eventOrder: record.processedEventIds.slice(),
+      pendingEventIds: new Map(),
+    };
+    recordEntries.set(recordId, entry);
+    return entry;
+  })().finally(() => recordLoads.delete(recordId));
+  recordLoads.set(recordId, loading);
+  return loading;
+}
+
+async function deleteVideoRecord(recordId) {
+  if (!validRecordId(recordId)) throw new Error('视频记录标识无效');
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+  deletingRecords.add(recordId);
+  let entry = null;
+  let entryWasSavePaused = false;
+  try {
+    const pendingLoad = recordLoads.get(recordId);
+    if (pendingLoad) {
+      try { await pendingLoad; } catch (_) {}
+    }
+    entry = recordEntries.get(recordId) || null;
+    if (entry) {
+      entryWasSavePaused = entry.savePaused;
+      entry.savePaused = true;
+      clearTimeout(entry.saveTimer);
+      entry.saveTimer = null;
+      if (entry.mergePromise) await entry.mergePromise;
+      if (entry.savePromise) await entry.savePromise;
+      clearTimeout(entry.saveTimer);
+      entry.saveTimer = null;
+    }
+
+    const all = await chrome.storage.local.get(null);
+    const fallback = Object.keys(all)
+      .filter((key) => key.startsWith('video_') && key !== recordKey(recordId))
+      .map((key) => ({ id: key.slice(6), record: all[key] }))
+      .sort((a, b) => (Number(b.record && b.record.capturedAt) || 0) - (Number(a.record && a.record.capturedAt) || 0))[0];
+    await chrome.storage.local.remove(recordKey(recordId));
+    if (all.lastVideoId === recordId) {
+      try {
+        if (fallback && validRecordId(fallback.id)) await chrome.storage.local.set({ lastVideoId: fallback.id });
+        else await chrome.storage.local.remove('lastVideoId');
+      } catch (_) {
+        // The video record is already deleted; a stale lastVideoId is harmless.
       }
-      wordMap.get(surface).buckets.add(bucket); // 同一个 3 分钟区只算一次
+    }
+    recordEntries.delete(recordId);
+  } catch (error) {
+    if (entry) {
+      entry.savePaused = entryWasSavePaused;
+      if (entry.dirty && !entry.saveTimer && !entry.savePromise) scheduleSave(entry, 0);
+    }
+    throw error;
+  } finally {
+    deletingRecords.delete(recordId);
+  }
+}
+
+function rememberEventId(entry, eventId) {
+  const fingerprint = eventFingerprint(eventId);
+  if (entry.processedEventIds.has(fingerprint)) return;
+  entry.processedEventIds.add(fingerprint);
+  entry.eventOrder.push(fingerprint);
+  if (entry.eventOrder.length > MAX_EVENT_IDS) {
+    const removed = entry.eventOrder.splice(0, entry.eventOrder.length - MAX_EVENT_IDS);
+    for (const id of removed) entry.processedEventIds.delete(id);
+  }
+}
+
+function eventFingerprint(eventId) {
+  const value = String(eventId);
+  let left = 2166136261;
+  let right = 0x9e3779b9;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    left = Math.imul(left ^ code, 16777619);
+    right = Math.imul(right ^ code, 2246822519);
+  }
+  return (left >>> 0).toString(16).padStart(8, '0') + (right >>> 0).toString(16).padStart(8, '0');
+}
+
+function getOwner(sender, sessionId) {
+  return {
+    tabId: sender && sender.tab ? sender.tab.id : null,
+    sessionId: String(sessionId || ''),
+  };
+}
+
+function sameOwner(a, b) {
+  return a.tabId === b.tabId && a.sessionId === b.sessionId;
+}
+
+function addOwner(list, owner) {
+  if (!list.some((item) => sameOwner(item, owner))) list.push(owner);
+}
+
+function sendPersisted(entry, eventIds, version) {
+  const groups = new Map();
+  for (const eventId of eventIds) {
+    const pending = entry.pendingEventIds.get(eventId);
+    if (!pending || pending.version > version) continue;
+    for (const owner of pending.owners) {
+      if (owner.tabId == null) continue;
+      const key = owner.tabId + ':' + owner.sessionId;
+      if (!groups.has(key)) groups.set(key, { owner, eventIds: [] });
+      groups.get(key).eventIds.push(eventId);
+    }
+    entry.pendingEventIds.delete(eventId);
+  }
+  for (const { owner, eventIds: ids } of groups.values()) {
+    chrome.tabs.sendMessage(owner.tabId, {
+      type: 'PERSISTED',
+      recordId: entry.recordId,
+      sessionId: owner.sessionId,
+      eventIds: ids,
+      version,
+    }, () => void chrome.runtime.lastError);
+  }
+}
+
+function notifyPopup(message) {
+  try {
+    chrome.runtime.sendMessage(message, () => void chrome.runtime.lastError);
+  } catch (_) {}
+}
+
+function scheduleSave(entry, delayOverride) {
+  if (entry.savePaused || entry.savePromise) return;
+  clearTimeout(entry.saveTimer);
+  const now = Date.now();
+  const remainingMax = Math.max(0, entry.dirtySince + RECORD_SAVE_MAX_WAIT_MS - now);
+  const delay = delayOverride == null ? Math.min(RECORD_SAVE_DELAY_MS, remainingMax) : delayOverride;
+  entry.saveTimer = setTimeout(() => {
+    entry.saveTimer = null;
+    void persistRecord(entry);
+  }, delay);
+}
+
+async function persistRecord(entry) {
+  if (!entry.dirty || entry.savePaused) return;
+  if (entry.savePromise) return entry.savePromise;
+  clearTimeout(entry.saveTimer);
+  entry.saveTimer = null;
+  const version = entry.version;
+  const eventIds = Array.from(entry.pendingEventIds.entries())
+    .filter(([, pending]) => pending.version <= version)
+    .map(([id]) => id);
+  const snapshot = cloneRecord(entry.record);
+  snapshot.processedEventIds = entry.eventOrder.slice(-MAX_EVENT_IDS);
+  snapshot.words.sort((a, b) => (b.times || []).length - (a.times || []).length);
+  snapshot.totalWords = snapshot.words.length;
+  snapshot.version = version;
+  const startedAt = nowEpoch();
+  entry.savePromise = (async () => {
+    try {
+      await chrome.storage.local.set({ [entry.key]: snapshot, lastVideoId: entry.recordId });
+      entry.persistedVersion = Math.max(entry.persistedVersion, version);
+      entry.saveRetries = 0;
+      entry.retryDelay = 0;
+      entry.dirty = entry.version > version;
+      if (!entry.dirty) entry.dirtySince = 0;
+      const persistedEpoch = nowEpoch();
+      for (const id of eventIds) {
+        const pending = entry.pendingEventIds.get(id);
+        if (!pending) continue;
+        const duration = persistedEpoch - pending.capturedAtEpoch;
+        if (Number.isFinite(duration) && duration >= 0) {
+          addPerfSample({ saveMs: persistedEpoch - startedAt, captureToSaveMs: duration });
+        }
+      }
+      sendPersisted(entry, eventIds, version);
+      notifyPopup({
+        type: 'RECORD_PERSISTED',
+        recordId: entry.recordId,
+        version: version,
+        persistedVersion: entry.persistedVersion,
+        savedAtEpoch: nowEpoch(),
+      });
+      if (entry.dirty) scheduleSave(entry, 0);
+      else trimRecordCache();
+    } catch (error) {
+      entry.saveRetries += 1;
+      entry.dirty = true;
+      notifyPopup({
+        type: 'RECORD_SAVE_FAILED',
+        recordId: entry.recordId,
+        version: version,
+        error: '本地保存失败：' + (error && error.message ? error.message : '未知错误'),
+        retries: entry.saveRetries,
+      });
+      if (entry.saveRetries >= MAX_SAVE_RETRIES) {
+        entry.savePaused = true;
+        notifyPopup({
+          type: 'RECORD_SAVE_PAUSED',
+          recordId: entry.recordId,
+          error: '本地保存连续失败，采集已暂停。旧记录和未确认输入仍保留在打开的页面中。',
+        });
+      } else {
+        entry.retryDelay = 500 * Math.pow(2, entry.saveRetries - 1);
+      }
+    } finally {
+      entry.savePromise = null;
+      if (entry.dirty && !entry.savePaused && !entry.saveTimer) {
+        scheduleSave(entry, entry.retryDelay || 0);
+        entry.retryDelay = 0;
+      }
+    }
+  })();
+  return entry.savePromise;
+}
+
+function cueTimeKey(seconds) {
+  return Math.round(seconds * 10) / 10;
+}
+
+function mergeCueIntoEntry(entry, cue, index, changedWords) {
+  const surfaces = extractVocabularyWords(cue.text, index);
+  const timeKey = cueTimeKey(cue.start);
+  const timeLabel = fmtTime(timeKey);
+  for (const surface of surfaces) {
+    const match = matchVocabulary(surface, index);
+    if (!match) continue;
+    let word = entry.wordIndex.get(surface);
+    if (!word) {
+      word = {
+        word: surface,
+        lemma: match.lemma,
+        meaning: match.meaning || '',
+        categories: match.categories || [],
+        times: [],
+      };
+      entry.wordIndex.set(surface, word);
+      entry.record.words.push(word);
+    }
+    const timeValues = (word.times || []).map(parseTimeSeconds).filter((value) => value != null);
+    if (!timeValues.includes(timeKey)) {
+      timeValues.push(timeKey);
+      timeValues.sort((a, b) => a - b);
+      word.times = timeValues.slice(0, MAX_TIMES).map(fmtTime);
+      changedWords.set(surface, cloneRecord(word));
+    } else if (!word.meaning || !word.categories || !word.categories.length) {
+      word.lemma = match.lemma;
+      word.meaning = match.meaning || word.meaning || '';
+      word.categories = match.categories || [];
+      changedWords.set(surface, cloneRecord(word));
     }
   }
+}
 
-  const result = [];
-  for (const [word, data] of wordMap) {
-    const buckets = Array.from(data.buckets).sort((a, b) => a - b);
-    result.push({
-      word: word,          // 字幕原样
-      lemma: data.lemma,   // 还原词根
-      meaning: data.meaning,
-      // 每个 3 分钟区取区首时间（0:00 / 3:00 / 6:00…），最多 10 个
-      times: buckets.slice(0, MAX_TIMES).map((b) => fmtTime(b * TIME_BUCKET_SEC)),
+function validCaptionEvents(events) {
+  if (!Array.isArray(events) || events.length === 0 || events.length > 100) {
+    throw new Error('字幕增量消息格式错误或单批数量超限');
+  }
+  const normalized = [];
+  const seen = new Set();
+  for (const item of events) {
+    const cue = item && item.cue;
+    if (!item || typeof item.eventId !== 'string' || item.eventId.length > 180 || seen.has(item.eventId)) continue;
+    if (!cue || typeof cue.text !== 'string' || cue.text.length > 4000 || !Number.isFinite(Number(cue.start)) || Number(cue.start) < 0) continue;
+    const text = cue.text.trim();
+    if (!text) continue;
+    seen.add(item.eventId);
+    normalized.push({ eventId: item.eventId, cue: {
+      text,
+      start: Number(cue.start),
+      capturedAtEpoch: Number.isFinite(Number(cue.capturedAtEpoch)) ? Number(cue.capturedAtEpoch) : undefined,
+    } });
+  }
+  if (!normalized.length) throw new Error('没有有效字幕内容');
+  return normalized;
+}
+
+async function ingestCaptionEvents(msg, sender, events) {
+  const recordId = msg.recordId || msg.videoId;
+  if (!validRecordId(recordId)) throw new Error('当前视频身份无效，字幕未保存');
+  const owner = getOwner(sender, msg.sessionId);
+  const entry = await getRecordEntry(recordId);
+  if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+  if (entry.savePaused) throw new Error('本地保存连续失败，已暂停接收字幕。请先检查扩展存储空间后重新抓取。');
+  const previousMerge = entry.mergePromise || Promise.resolve();
+  const mergeTask = previousMerge.then(async () => {
+    if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+    const acceptedIds = [];
+    const replayIds = [];
+    const newEvents = [];
+    for (const item of events) {
+      acceptedIds.push(item.eventId);
+      if (entry.processedEventIds.has(eventFingerprint(item.eventId))) {
+        if (entry.pendingEventIds.has(item.eventId)) {
+          addOwner(entry.pendingEventIds.get(item.eventId).owners, owner);
+        } else {
+          replayIds.push(item.eventId);
+        }
+      } else if (!newEvents.some((event) => event.eventId === item.eventId)) {
+        newEvents.push(item);
+      }
+    }
+    if (replayIds.length && owner.tabId != null) {
+      chrome.tabs.sendMessage(owner.tabId, {
+        type: 'PERSISTED', recordId, sessionId: owner.sessionId,
+        eventIds: replayIds, version: entry.persistedVersion,
+      }, () => void chrome.runtime.lastError);
+    }
+    const receivedAtEpoch = nowEpoch();
+    const matchStarted = nowEpoch();
+    const index = await loadVocabularies();
+    if (deletingRecords.has(recordId)) throw new Error('这条历史记录正在删除，请稍后重试。');
+    const changedWords = new Map();
+    const capturedEpochs = [];
+    if (newEvents.length) {
+      for (const item of newEvents) {
+        const capturedAtEpoch = Number(item.cue.capturedAtEpoch);
+        if (Number.isFinite(capturedAtEpoch)) capturedEpochs.push(capturedAtEpoch);
+        mergeCueIntoEntry(entry, item.cue, index, changedWords);
+        rememberEventId(entry, item.eventId);
+        entry.pendingEventIds.set(item.eventId, {
+          version: 0,
+          owners: [owner],
+          capturedAtEpoch: Number.isFinite(capturedAtEpoch) ? capturedAtEpoch : receivedAtEpoch,
+        });
+      }
+      entry.version += 1;
+      entry.record.version = entry.version;
+      entry.record.title = String(msg.title || entry.record.title || '').slice(0, 500);
+      entry.record.identityConfirmed = msg.identityConfirmed !== false;
+      entry.record.source = String(msg.source || entry.record.source || 'unknown').slice(0, 80);
+      const sources = new Set(Array.isArray(entry.record.sources) ? entry.record.sources : []);
+      sources.add(entry.record.source);
+      entry.record.sources = Array.from(sources).slice(-8);
+      entry.record.capturedAt = Date.now();
+      entry.record.totalWords = entry.record.words.length;
+      entry.record.processedEventIds = entry.eventOrder.slice(-MAX_EVENT_IDS);
+      for (const item of newEvents) {
+        const pending = entry.pendingEventIds.get(item.eventId);
+        if (pending) pending.version = entry.version;
+      }
+      if (!entry.dirty) entry.dirtySince = Date.now();
+      entry.dirty = true;
+      scheduleSave(entry);
+    }
+    const matchedAtEpoch = nowEpoch();
+    const earliestCapture = capturedEpochs.length ? Math.min(...capturedEpochs) : receivedAtEpoch;
+    const matchMs = matchedAtEpoch - matchStarted;
+    const inputLagMs = receivedAtEpoch - earliestCapture;
+    addPerfSample({ matchMs, inputLagMs, source: String(msg.source || 'unknown') });
+    const displayDelta = await filterRecordForDisplay({
+      videoId: recordId,
+      recordId,
+      identityConfirmed: entry.record.identityConfirmed,
+      words: Array.from(changedWords.values()),
+    });
+    const changedAtEpoch = nowEpoch();
+    notifyPopup({
+      type: 'RECORD_UPDATED',
+      recordId,
+      videoId: recordId,
+      sessionId: msg.sessionId || '',
+      tabId: sender && sender.tab ? sender.tab.id : null,
+      title: entry.record.title,
+      identityConfirmed: entry.record.identityConfirmed,
+      version: entry.version,
+      persistedVersion: entry.persistedVersion,
+      totalWords: entry.record.words.length,
+      changedWords: displayDelta ? displayDelta.words : [],
+      matchedAtEpoch,
+      capturedAtEpoch: earliestCapture,
+      changedAtEpoch,
+      source: entry.record.source,
+      hadNewMatches: changedWords.size > 0,
+    });
+    return {
+      ok: true,
+      acceptedIds,
+      recordId,
+      version: entry.version,
+      persistedVersion: entry.persistedVersion,
+      matchedAtEpoch,
+      hadNewMatches: changedWords.size > 0,
+    };
+  });
+  entry.mergePromise = mergeTask;
+  mergeTask.then(() => {
+    if (entry.mergePromise === mergeTask) entry.mergePromise = null;
+  }, () => {
+    if (entry.mergePromise === mergeTask) entry.mergePromise = null;
+  });
+  return mergeTask;
+}
+
+async function processLegacyCaptions(msg, sender) {
+  const cues = Array.isArray(msg.cues) ? msg.cues : [];
+  if (!cues.length) throw new Error('没有字幕内容');
+  const events = [];
+  const prefix = 'legacy_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  for (let i = 0; i < cues.length; i += 1) {
+    events.push({
+      eventId: prefix + '_' + i,
+      cue: { text: String(cues[i].text || ''), start: Number(cues[i].start) || 0, capturedAtEpoch: nowEpoch() },
     });
   }
+  const recordId = msg.recordId || msg.videoId;
+  return ingestCaptionEvents({
+    ...msg,
+    recordId,
+    identityConfirmed: msg.identityConfirmed !== false,
+    source: msg.source || 'legacy-batch',
+  }, sender, events);
+}
 
-  result.sort((a, b) => b.times.length - a.times.length);
+function youtubeVideoIdFromUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.searchParams.get('v') || (url.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]+)/) || [])[1] || '';
+  } catch (_) { return ''; }
+}
 
-  const key = 'video_' + videoId;
-  const record = {
-    videoId: videoId,
-    title: title,
-    words: result,
-    totalWords: result.length,
-    capturedAt: Date.now(),
-    source: msg.source || 'unknown',
-  };
-
-  chrome.storage.local.set({ [key]: record });
-  chrome.storage.local.set({ lastVideoId: videoId });
-  return record;
+async function fetchYoutubeCaptionCues(trackUrl, expectedVideoId, sender) {
+  const pageUrl = String(sender && (sender.url || sender.origin) || '');
+  let page;
+  let url;
+  try {
+    page = new URL(pageUrl);
+    url = new URL(trackUrl);
+  } catch (_) { throw new Error('YouTube 页面或字幕地址无效'); }
+  if (page.protocol !== 'https:' || !/(^|\.)youtube\.com$/.test(page.hostname)) {
+    throw new Error('字幕请求只允许从 YouTube 页面发起');
+  }
+  const pageVideoId = youtubeVideoIdFromUrl(page.href);
+  if (!pageVideoId || pageVideoId !== expectedVideoId) throw new Error('当前 YouTube 视频已切换，已取消旧字幕请求');
+  if (url.protocol !== 'https:' || !/(^|\.)youtube\.com$/.test(url.hostname) || url.pathname !== '/api/timedtext') {
+    throw new Error('字幕地址未通过 YouTube 域名和路径校验');
+  }
+  if (!url.searchParams.has('fmt')) url.searchParams.set('fmt', 'json3');
+  const response = await fetchWithTimeout(url.href, 20000);
+  if (!response.ok) throw new Error('YouTube 字幕请求失败 HTTP ' + response.status);
+  const contentLength = Number(response.headers && response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > 8 * 1024 * 1024) throw new Error('字幕轨响应超过 8 MB 上限');
+  const text = await response.text();
+  if (text.length > 8 * 1024 * 1024) throw new Error('字幕轨响应超过 8 MB 上限');
+  let data;
+  try { data = JSON.parse(text); } catch (_) { throw new Error('YouTube 字幕响应不是可读的 JSON3 格式'); }
+  const cues = [];
+  for (const event of (Array.isArray(data.events) ? data.events : [])) {
+    if (!event || !Array.isArray(event.segs) || !Number.isFinite(Number(event.tStartMs))) continue;
+    const cueText = event.segs.map((segment) => String(segment && segment.utf8 || '')).join(' ').replace(/\s+/g, ' ').trim();
+    if (cueText) cues.push({ start: Number(event.tStartMs) / 1000, text: cueText });
+    if (cues.length > 5000) throw new Error('字幕轨超过 5,000 条上限，未导入');
+  }
+  return cues;
 }
 
 // ============ 5. 词形变化生成器（本地，秒出，不联网） ============
@@ -505,16 +1087,15 @@ async function lookupWordOnline(word) {
   }
 }
 
-// 找词表内的同根词（共享词根，且存在于四级词表中）
-function findCognates(lemma, cet4Map) {
+// 找内置词表中的同根候选词（按前缀匹配）。
+function findCognates(lemma, index) {
   const results = new Set();
-  const root = lemma.length > 5 ? lemma.slice(0, 5) : lemma;
   // 用前 4~6 个字母做词根前缀匹配，控制误报
   const prefixes = [];
   for (let n = Math.min(6, lemma.length); n >= 3; n--) {
     prefixes.push(lemma.slice(0, n));
   }
-  for (const key of Object.keys(cet4Map)) {
+  for (const key of Object.keys(index)) {
     if (key === lemma) continue;
     for (const p of prefixes) {
       if (key.startsWith(p) && Math.abs(key.length - lemma.length) <= 6) {
@@ -529,105 +1110,154 @@ function findCognates(lemma, cet4Map) {
   return arr.slice(0, 12);
 }
 
-// ============ 6. 出题（百词斩式单选题，题库全本地、不联网） ============
-let QUIZ = null;
-async function loadQuiz() {
-  if (QUIZ) return QUIZ;
-  try {
-    const url = chrome.runtime.getURL('quiz_bank.json');
-    const resp = await fetch(url);
-    QUIZ = await resp.json();
-    console.log('[YT-CET4] 题库加载完成，共', Object.keys(QUIZ).length, '词');
-    return QUIZ;
-  } catch (e) {
-    console.error('[YT-CET4] 题库加载失败，将用词表兜底出题', e);
-    QUIZ = {};
-    return QUIZ;
-  }
-}
-
-let CET4_KEYS = null;
-function cet4Keys(cet4Map) {
-  if (!CET4_KEYS) CET4_KEYS = Object.keys(cet4Map);
-  return CET4_KEYS;
-}
-
-// 给一个词生成单选题：正确的四级释义 1 个 + 形近/易混干扰释义 3 个，打乱顺序
-function buildQuiz(word, cet4Map, bank) {
-  const w = String(word || '').toLowerCase();
-  const lemma = lemmatize(w);
-  let base;
-  if (cet4Map[w]) base = w;
-  else if (cet4Map[lemma]) base = lemma;
-  else return null;
-
-  const correct = trimMeaning(cet4Map[base], 2) || cet4Map[base];
-  const opts = [];
-  const seen = new Set([correct]);
-
-  // 1) 优先用预生成题库里的形近干扰词
-  const ds = (bank && (bank[base] || bank[w])) || [];
-  for (const d of ds) {
-    if (opts.length >= 3) break;
-    const dm = cet4Map[d];
-    if (!dm) continue;
-    const t = trimMeaning(dm, 2) || dm;
-    if (seen.has(t)) continue;
-    seen.add(t);
-    opts.push(t);
-  }
-
-  // 2) 兜底：题库缺失或不足时，现场从词表按「首字母相同 → 长度相同」补
-  const fill = (pred) => {
-    for (const k of cet4Keys(cet4Map)) {
-      if (opts.length >= 3) return;
-      if (k === base || k === w) continue;
-      if (pred && !pred(k)) continue;
-      const t = trimMeaning(cet4Map[k], 2) || cet4Map[k];
-      if (!t || seen.has(t)) continue;
-      seen.add(t);
-      opts.push(t);
-    }
-  };
-  fill((k) => k[0] === base[0]);
-  fill((k) => k[0] === base[0] || k.length === base.length);
-  fill(null);
-
-  const options = opts.concat([correct]);
-  for (let i = options.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = options[i];
-    options[i] = options[j];
-    options[j] = tmp;
-  }
-  return {
-    word: w,
-    base: base,
-    lemma: lemma !== w ? lemma : null,
-    correct: correct,
-    options: options,
-    answer: options.indexOf(correct),
-  };
-}
-
 // ============ 6. 斩词 ============
+let familiarMutationQueue = Promise.resolve();
+
+function updateFamiliarWords(mutator) {
+  const task = familiarMutationQueue.then(async () => {
+    const data = await chrome.storage.local.get('familiarWords');
+    const list = Array.isArray(data.familiarWords) ? data.familiarWords.slice() : [];
+    const next = mutator(list);
+    await chrome.storage.local.set({ familiarWords: next });
+    return next;
+  });
+  familiarMutationQueue = task.catch(() => {});
+  return task;
+}
+
 async function slashWord(word) {
-  const key = 'familiarWords';
-  const data = await chrome.storage.local.get(key);
-  let list = data[key] || [];
-  if (!list.includes(word)) {
-    list.push(word);
-    await chrome.storage.local.set({ [key]: list });
-  }
-  return list;
+  return updateFamiliarWords((list) => {
+    if (!list.includes(word)) list.push(word);
+    return list;
+  });
 }
 
 async function unslashWord(word) {
-  const key = 'familiarWords';
-  const data = await chrome.storage.local.get(key);
-  let list = (data[key] || []).filter((w) => w !== word);
-  await chrome.storage.local.set({ [key]: list });
-  return list;
+  return updateFamiliarWords((list) => list.filter((item) => item !== word));
+}
+
+async function clearFamiliarWords() {
+  return updateFamiliarWords(() => []);
+}
+
+let QUIZ_BANK = null;
+let QUIZ_EXTRAS = null;
+let quizDataLoad = null;
+
+async function loadQuizData() {
+  if (QUIZ_BANK && QUIZ_EXTRAS) return { bank: QUIZ_BANK, extras: QUIZ_EXTRAS };
+  if (!quizDataLoad) {
+    quizDataLoad = Promise.all(['quiz_bank.json', 'quiz_extras.json'].map(async (file) => {
+      const response = await fetch(chrome.runtime.getURL(file));
+      if (!response.ok) throw new Error(file + ' 加载失败');
+      return response.json();
+    })).then(([bank, extras]) => {
+      if (!bank || Array.isArray(bank) || typeof bank !== 'object' ||
+          !extras || Array.isArray(extras) || typeof extras !== 'object') {
+        throw new Error('题库文件格式错误');
+      }
+      QUIZ_BANK = bank;
+      QUIZ_EXTRAS = extras;
+      return { bank, extras };
+    }).catch((error) => {
+      quizDataLoad = null;
+      throw error;
+    });
+  }
+  return quizDataLoad;
+}
+
+function deterministicShuffle(values, seedText) {
+  const shuffled = values.slice();
+  let seed = 2166136261;
+  for (const character of String(seedText)) seed = Math.imul(seed ^ character.charCodeAt(0), 16777619);
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function normalizeQuizMeaning(value) {
+  return String(value || '').replace(/[\s，,。；;：:、\/（）()\[\]【】]/g, '').toLowerCase();
+}
+
+function quizPartOfSpeech(meaning) {
+  const match = String(meaning || '').match(/^(vt|vi|adj|adv|prep|conj|pron|num|det|aux|abbr|int|ad|n|v|a)(?:&(?:vt|vi|adj|adv|prep|conj|pron|num|det|aux|abbr|int|ad|n|v|a))?\./i);
+  return match ? match[0].toLowerCase() : '';
+}
+
+function meaningForQuizWord(word, index) {
+  const item = index[word];
+  return item ? trimMeaning(item.meaning, 2) || item.meaning || '' : '';
+}
+
+function buildQuizQuestion(surface, category, index, bank, extras) {
+  const match = matchVocabulary(surface, index);
+  if (!match || !match.categories.includes(category)) return null;
+  const lemma = match.lemma;
+  const extra = extras[lemma];
+  let correct;
+  let distractors;
+  let source;
+  let distractorWords = [];
+  if (extra && typeof extra.correct === 'string' && Array.isArray(extra.distractors)) {
+    correct = extra.correct;
+    distractors = extra.distractors;
+    source = extra.meaningSource || 'generated';
+    distractorWords = extra.distractorWords || [];
+  } else {
+    const sourceDistractorWords = bank[lemma];
+    if (!Array.isArray(sourceDistractorWords) || sourceDistractorWords.length !== 3) return null;
+    correct = meaningForQuizWord(lemma, index);
+    const selectedWords = [];
+    distractors = [];
+    const usedMeanings = new Set([normalizeQuizMeaning(correct)]);
+    const addDistractor = (word) => {
+      const meaning = meaningForQuizWord(word, index);
+      const key = normalizeQuizMeaning(meaning);
+      if (!meaning || !key || usedMeanings.has(key)) return false;
+      selectedWords.push(word);
+      distractors.push(meaning);
+      usedMeanings.add(key);
+      return true;
+    };
+    sourceDistractorWords.forEach(addDistractor);
+    if (distractors.length < 3) {
+      const correctPos = quizPartOfSpeech(correct);
+      const candidates = deterministicShuffle(Object.keys(index).filter((word) =>
+        word !== lemma && index[word].categories.includes('cet4') && !sourceDistractorWords.includes(word)),
+      'cet4-fallback:' + lemma);
+      for (const candidate of candidates) {
+        if (correctPos && quizPartOfSpeech(meaningForQuizWord(candidate, index)) !== correctPos) continue;
+        addDistractor(candidate);
+        if (distractors.length === 3) break;
+      }
+      if (distractors.length < 3) {
+        for (const candidate of candidates) {
+          addDistractor(candidate);
+          if (distractors.length === 3) break;
+        }
+      }
+    }
+    if (distractors.length !== 3) return null;
+    source = selectedWords.some((word) => !sourceDistractorWords.includes(word))
+      ? 'upstream-cet4-quiz-bank+runtime-dedup'
+      : 'upstream-cet4-quiz-bank';
+    distractorWords = selectedWords;
+  }
+  const unique = new Set([correct, ...distractors].map(normalizeQuizMeaning));
+  if (!correct || distractors.length !== 3 || unique.size !== 4 || Array.from(unique).some((value) => !value)) return null;
+  const options = deterministicShuffle([correct, ...distractors], category + ':' + lemma);
+  return {
+    lemma,
+    correct,
+    options,
+    correctIndex: options.indexOf(correct),
+    meaningSource: source,
+    distractorWords,
+  };
 }
 
 // ============ 7. 消息路由 ============
@@ -637,8 +1267,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg.type) {
       case 'CAPTIONS': {
-        const rec = await processCaptions(msg);
-        sendResponse({ ok: true, record: rec });
+        const result = await processLegacyCaptions(msg, sender);
+        sendResponse(result);
+        break;
+      }
+
+      case 'CAPTIONS_DELTA': {
+        const events = validCaptionEvents(msg.events);
+        const result = await ingestCaptionEvents(msg, sender, events);
+        sendResponse(result);
+        break;
+      }
+
+      case 'CAPTURE_STATUS': {
+        notifyPopup({
+          type: 'CAPTURE_STATUS',
+          tabId: sender && sender.tab ? sender.tab.id : null,
+          recordId: msg.recordId || msg.videoId || null,
+          sessionId: msg.sessionId || null,
+          statusSequence: Number(msg.statusSequence) || 0,
+          title: String(msg.title || '').slice(0, 500),
+          identityConfirmed: msg.identityConfirmed !== false,
+          status: msg.status || 'waiting',
+          source: msg.source || '',
+          detail: String(msg.detail || '').slice(0, 300),
+          atEpoch: nowEpoch(),
+        });
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case 'FETCH_YOUTUBE_CAPTIONS': {
+        if (typeof msg.trackUrl !== 'string' || typeof msg.expectedVideoId !== 'string') {
+          throw new Error('YouTube 字幕请求参数无效');
+        }
+        const startedAt = Date.now();
+        let cues;
+        try {
+          cues = await fetchYoutubeCaptionCues(msg.trackUrl, msg.expectedVideoId, sender);
+        } finally {
+          addPerfSample({ youtubeFetchMs: Date.now() - startedAt });
+        }
+        sendResponse({ ok: true, cues: cues, count: cues.length });
+        break;
+      }
+
+      case 'RETRY_SAVE': {
+        const recordId = msg.recordId;
+        const entry = recordId && recordEntries.get(recordId);
+        if (entry) {
+          entry.savePaused = false;
+          entry.saveRetries = 0;
+          if (entry.dirty) scheduleSave(entry, 0);
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case 'PERF_SAMPLE': {
+        const captureToPopupMs = Number(msg.captureToPopupMs);
+        if (Number.isFinite(captureToPopupMs) && captureToPopupMs >= 0 && captureToPopupMs < 60000) {
+          addPerfSample({ captureToPopupMs });
+        }
+        const inputToBackgroundMs = Number(msg.inputToBackgroundMs);
+        if (Number.isFinite(inputToBackgroundMs) && inputToBackgroundMs >= 0 && inputToBackgroundMs < 60000) {
+          addPerfSample({ inputToBackgroundMs });
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case 'GET_PERF': {
+        sendResponse({ ok: true, summary: getPerfSummary() });
         break;
       }
 
@@ -665,21 +1365,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
-      // 本地数据（秒出）：原型、四级释义（精简）、单词变形、同根词
+      case 'GET_VOCABULARY': {
+        await loadVocabularies();
+        const data = await chrome.storage.local.get(['selectedVocabulary', 'learningMode']);
+        const selectedVocabulary = VOCABULARIES.includes(data.selectedVocabulary) ? data.selectedVocabulary : 'cet4';
+        const learningMode = LEARNING_MODES.includes(data.learningMode) ? data.learningMode : 'normal';
+        sendResponse({ ok: true, selectedVocabulary, learningMode });
+        break;
+      }
+
+      case 'SET_VOCABULARY': {
+        if (!VOCABULARIES.includes(msg.selectedVocabulary)) throw new Error('不支持的词库');
+        await chrome.storage.local.set({ selectedVocabulary: msg.selectedVocabulary });
+        sendResponse({ ok: true, selectedVocabulary: msg.selectedVocabulary });
+        break;
+      }
+
+      case 'SET_LEARNING_MODE': {
+        if (!LEARNING_MODES.includes(msg.learningMode)) throw new Error('不支持的学习模式');
+        await chrome.storage.local.set({ learningMode: msg.learningMode });
+        sendResponse({ ok: true, learningMode: msg.learningMode });
+        break;
+      }
+
+      case 'GET_QUIZ_BATCH': {
+        const category = VOCABULARIES.includes(msg.vocabulary) ? msg.vocabulary : 'cet4';
+        const index = await loadVocabularies();
+        const { bank, extras } = await loadQuizData();
+        const words = Array.isArray(msg.words) ? msg.words.slice(0, 500) : [];
+        const quizzes = {};
+        for (const rawWord of words) {
+          const word = String(rawWord || '').toLowerCase();
+          const match = matchVocabulary(word, index);
+          if (!match) continue;
+          const question = buildQuizQuestion(word, category, index, bank, extras);
+          if (question) quizzes[word] = question;
+        }
+        sendResponse({ ok: true, vocabulary: category, quizzes });
+        break;
+      }
+
+      // 本地数据：原型、全部类别、词表释义、单词变形、同根词
       case 'LOOKUP_LOCAL': {
-        const cet4Map = await loadCET4();
+        const index = await loadVocabularies();
         const word = (msg.word || '').toLowerCase();
-        const lemma = lemmatize(word);
-        const base = lemma !== word && cet4Map[lemma] ? lemma : (cet4Map[word] ? word : lemma);
-        const rawMeaning = cet4Map[base] || '';
-        const cognates = findCognates(base, cet4Map);
+        const match = matchVocabulary(word, index);
+        const base = match ? match.lemma : word;
+        const rawMeaning = match ? match.meaning : '';
+        const cognates = findCognates(base, index);
         sendResponse({
           ok: true,
           surface: word,
-          lemma: lemma !== word ? lemma : null,
+          lemma: base !== word ? base : null,
           base: base,
-          cet4Meaning: trimMeaning(rawMeaning, 2),   // 精简：每词性最多 2 个常用释义
-          inflections: inflect(base, rawMeaning),    // 单词变形（本地算，秒出）
+          categories: match ? match.categories : [],
+          localMeaning: trimMeaning(rawMeaning, 2),
+          inflections: rawMeaning ? inflect(base, rawMeaning) : {},
           cognates: cognates,
         });
         break;
@@ -693,25 +1434,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
-      // 出题（本地题库）：给一批词各出 4 个中文释义选项
-      case 'GET_QUIZ_BATCH': {
-        const cet4Map = await loadCET4();
-        const bank = await loadQuiz();
-        const list = Array.isArray(msg.words) ? msg.words : [];
-        const quizzes = {};
-        for (const w of list) {
-          const q = buildQuiz(w, cet4Map, bank);
-          if (q) quizzes[w] = q;
+      case 'GET_VIDEO': {
+        const videoId = msg.recordId || msg.videoId;
+        if (!validRecordId(videoId)) throw new Error('视频记录标识无效');
+        const key = recordKey(videoId);
+        let rawRecord;
+        const cached = recordEntries.get(videoId);
+        if (cached) rawRecord = cached.record;
+        else {
+          const data = await chrome.storage.local.get(key);
+          rawRecord = data[key] || null;
         }
-        sendResponse({ ok: true, quizzes: quizzes });
+        sendResponse({
+          ok: true,
+          record: await filterRecordForDisplay(rawRecord),
+          version: cached ? cached.version : (rawRecord && rawRecord.version) || 0,
+          persistedVersion: cached ? cached.persistedVersion : (rawRecord && rawRecord.version) || 0,
+          saveFailed: !!(cached && cached.savePaused),
+          ...await getFamiliarWordsForDisplay(),
+        });
         break;
       }
 
-      case 'GET_VIDEO': {
-        const videoId = msg.videoId;
-        const key = 'video_' + videoId;
-        const data = await chrome.storage.local.get([key, 'familiarWords']);
-        sendResponse({ ok: true, record: data[key] || null, familiar: data.familiarWords || [] });
+      case 'DELETE_VIDEO': {
+        const videoId = msg.recordId || msg.videoId;
+        await deleteVideoRecord(videoId);
+        sendResponse({ ok: true, videoId: videoId });
         break;
       }
 
@@ -720,42 +1468,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const lastId = data.lastVideoId;
         let record = null;
         if (lastId) {
-          const d2 = await chrome.storage.local.get('video_' + lastId);
-          record = d2['video_' + lastId] || null;
+          const cached = recordEntries.get(lastId);
+          if (cached) record = await filterRecordForDisplay(cached.record);
+          else {
+            const d2 = await chrome.storage.local.get(recordKey(lastId));
+            record = await filterRecordForDisplay(d2[recordKey(lastId)] || null);
+          }
         }
-        sendResponse({ ok: true, record: record, familiar: data.familiarWords || [], lastVideoId: lastId });
+        sendResponse({ ok: true, record: record, ...await getFamiliarWordsForDisplay(), lastVideoId: lastId });
         break;
       }
 
       case 'SLASH_WORD': {
-        const list = await slashWord(msg.word);
-        sendResponse({ ok: true, familiar: list });
+        await slashWord(msg.word);
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'UNSLASH_WORD': {
-        const list = await unslashWord(msg.word);
-        sendResponse({ ok: true, familiar: list });
+        await unslashWord(msg.word);
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'GET_FAMILIAR': {
-        const data = await chrome.storage.local.get('familiarWords');
-        sendResponse({ ok: true, familiar: data.familiarWords || [] });
+        sendResponse({ ok: true, ...await getFamiliarWordsForDisplay() });
         break;
       }
 
       case 'CLEAR_FAMILIAR': {
-        await chrome.storage.local.remove('familiarWords');
-        sendResponse({ ok: true, familiar: [] });
+        await clearFamiliarWords();
+        sendResponse({ ok: true, familiar: [], familiarEntries: [] });
         break;
       }
 
       case 'GET_ALL_VIDEOS': {
         const all = await chrome.storage.local.get(null);
-        const videos = Object.keys(all)
+        const raw = new Map(Object.keys(all)
           .filter((k) => k.startsWith('video_'))
-          .map((k) => all[k]);
+          .map((key) => [key.slice(6), all[key]]));
+        for (const [recordId, entry] of recordEntries) raw.set(recordId, entry.record);
+        const videos = await Promise.all(Array.from(raw.values()).map((item) => filterRecordForDisplay(item)));
         videos.sort((a, b) => b.capturedAt - a.capturedAt);
         sendResponse({ ok: true, videos: videos });
         break;
@@ -764,7 +1517,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       default:
         sendResponse({ ok: false, error: 'unknown type' });
     }
-  })();
+  })().catch((error) => {
+    console.error('[Naiwa] 消息处理失败', error);
+    sendResponse({ ok: false, error: error.message || '处理失败，请重新加载扩展' });
+  });
 
   return true;
 });

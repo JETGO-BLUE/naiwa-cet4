@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>使用说明 · 奶娃过四级</title>
-<meta name="description" content="奶娃过四级浏览器扩展的安装与使用说明：如何加载扩展、怎么收集四级词汇、界面说明、常见问题排查。">
+<meta name="description" content="奶娃过四级浏览器扩展的安装与使用说明：普通模式和测试模式、字幕采集、词库筛选、题库来源与常见问题。">
 <style>:root{
     --bg:#fbfaf8; --card:#ffffff; --text:#23201c; --muted:#6b6459;
     --line:#e8e3da; --accent:#c2572a; --accent-soft:#fdf1ea;
@@ -88,8 +88,8 @@
 
 <main class="wrap">
 <h1>奶娃过四级 · 安装 &amp; 使用说明</h1>
-<p>一个 Chrome/Edge 扩展，抓取视频字幕里的<strong>四级词汇</strong>（优先读取「沉浸式翻译」的双语字幕），去重、<strong>每 3 分钟</strong>记录一次出现时间点，用<strong>四选一选择题</strong>帮你把词记牢（可点读发音），还能把熟悉的词一键「斩」掉。</p>
-<blockquote><strong>⚠️ 必读：一定要打开「沉浸式翻译」的双语字幕。</strong> 本扩展抓的词，就是从「沉浸式翻译」渲染出的双语字幕里取的（只取英文原文那一行）。 不开的话，除了 YouTube 自带字幕，<strong>Netflix / B站 这类平台基本抓不到词</strong> —— 想省事就一直开着。 「沉浸式翻译」是另一个免费扩展（应用商店搜 <code>Immersive Translate</code>），它把字幕显示成"英文一行、中文一行"。</blockquote>
+<p>一个 Chrome/Edge 扩展，增量抓取视频字幕里的<strong>四级、六级和雅思词汇</strong>。可选择单个词库，并在<strong>普通模式</strong>查词或<strong>测试模式</strong>练中文四选一；两种模式共享字幕记录、视频历史和已斩词。</p>
+<blockquote>字幕来源可为「沉浸式翻译」显示的英文原文、页面可读取的英文 TextTrack，或 YouTube 原生字幕轨。来源与网站不同，读取能力也会不同；字幕匹配在本地完成。</blockquote>
 <hr>
 <h2>一、安装（3 步）</h2>
 <p><strong>Chrome</strong>：地址栏输入 <code>chrome://extensions/</code> 回车</p>
@@ -104,35 +104,37 @@
 <hr>
 <h2>二、怎么用</h2>
 <ol>
-<li>打开任意一个<strong>有字幕</strong>的视频（YouTube / Netflix / B站等），并<strong>打开「沉浸式翻译」的双语字幕</strong> —— 画面上要能看到英文一行、中文一行</li>
+<li>打开有英文字幕的视频；可使用「沉浸式翻译」英文原文或页面提供的可读标准英文字幕轨</li>
 <li>让视频播放，双语字幕一句句出现时，本扩展会<strong>边看边自动累积</strong>单词</li>
-<li>点工具栏的 📚 图标查看已收集的四级词汇。每个词都配了<strong>一道四选一的中文释义题</strong>（不再直接给答案），下方跟着它在视频里出现的<strong>时间点</strong>（每 3 分钟记一次，<code>mm:ss</code>，最多 10 个）</li>
-<li><strong>单击单词本身</strong> → 朗读它的英文发音（系统语音合成，离线可用、不联网）</li>
+<li>点工具栏图标，在设置中选择四级、六级或雅思词库，以及普通模式或测试模式。两种模式都会隐藏基础词，模式切换不清空已采集记录。</li>
+<li>单词下方显示字幕中的<strong>精确时间点</strong>（沿用采集精度，最多到 0.1 秒；每词保留最早的 10 个不同时间点）</li>
+<li>测试模式单击单词可朗读；只使用浏览器标记为本地服务的英语音色，没有可用音色时会提示。</li>
 <li><strong>从 4 个中文释义里选一个</strong>：<ul>
 <li>选<strong>错</strong> → 那个选项旁立刻出现 <strong>❌</strong>，可以接着选，直到选对</li>
-<li>选<strong>对</strong> → 选项变绿打勾，并<strong>直接亮出这个词的中文释义</strong></li>
+<li>选<strong>对</strong> → 显示正确释义并完成本次题目；答对不会自动标记为熟悉词</li>
 </ul></li>
 <li>看到熟悉的词，点右边的 <strong>「斩」</strong> → 该词<strong>立刻从当前列表消失</strong></li>
-<li>想看得更深，点 <strong>「详解」</strong>（或答对后亮出的那条释义）→ 弹出详情（两阶段加载，本地内容秒出）：<ul>
-<li><strong>四级释义（常用）</strong>：每个词性只保留前 2 个常用释义，带【古】/(archaic)/(dated)/(rare) 等偏门标记的自动删除</li>
+<li>普通模式点击单词，或测试模式点击 <strong>「详解」</strong> → 弹出详情（两阶段加载，本地内容秒出）：<ul>
+<li><strong>本地词表释义（如有）</strong>：每个词性只保留前 2 个常用释义，带【古】/(archaic)/(dated)/(rare) 等偏门标记的自动删除</li>
 <li><strong>单词变形</strong>：复数 / 第三人称单数 / 过去式 / 过去分词 / 现在分词 / 比较级 / 最高级——<strong>本地计算，秒出</strong>，含约 100 个不规则动词 + 40 个不规则名词复数 + 不规则比较级</li>
 <li><strong>各词性释义</strong>：联网查询（主词典 4 秒超时 → 自动切 Wiktionary 兜底，双词典都 404 才放弃，以四级释义为准）</li>
-<li><strong>同根词</strong>（四级词表内）</li>
+<li><strong>同根词</strong>（内置词表内）</li>
 </ul></li>
 </ol>
 <blockquote>重要：本扩展<strong>优先读取「沉浸式翻译」渲染的双语字幕</strong>，所以它不再是"一次性抓完全部字幕"，而是<strong>跟着播放进度实时累积</strong>。你看到一个视频多长时间，就收集多少词。没开沉浸式翻译时，自动退回抓 YouTube 原生字幕。</blockquote>
 <hr>
 <h2>三、界面说明</h2>
-<table><thead><tr><th>标签页</th><th>作用</th></tr></thead><tbody><tr><td><strong>当前视频</strong></td><td>当前视频的四级词汇 + 四选一记词 + 时间点，可搜索、可斩词</td></tr><tr><td><strong>历史记录</strong></td><td>你看过的所有视频的词汇记录，点进去回看</td></tr><tr><td><strong>已斩词</strong></td><td>所有被你「斩」掉的熟悉词，可撤销、可清空</td></tr></tbody></table>
+<table><thead><tr><th>标签页</th><th>作用</th></tr></thead><tbody><tr><td><strong>当前视频</strong></td><td>当前词库和学习模式的单词卡/题卡与时间点，可搜索、可斩词</td></tr><tr><td><strong>历史记录</strong></td><td>按所选词库回看视频词汇，可删除单条记录；当前页面关联的记录暂不能删除</td></tr><tr><td><strong>已斩词</strong></td><td>所有被你「斩」掉的熟悉词，可撤销、可清空</td></tr></tbody></table>
 <hr>
 <h2>四、几个要点（务必看）</h2>
 <ol>
-<li><strong>一定要开沉浸式翻译的双语字幕</strong>：本扩展默认监听沉浸式翻译的双语字幕（<code>#immersive-translate-caption-window</code>），只取其中的<strong>英文原文</strong>行。它是<strong>唯一稳定的抓词通道，建议一直开着</strong>。全程只读、不修改它的 DOM，不会影响沉浸式翻译的正常显示，也不会影响你看视频。</li>
-<li><strong>没开沉浸式翻译会怎样</strong>：会自动退回抓 YouTube 原生字幕轨，所以 <strong>YouTube 上勉强能用</strong>；但 <strong>Netflix / B站 等平台没有原生英文字幕可抓，不开就一定抓不到词</strong>。</li>
+<li><strong>沉浸式翻译通道</strong>：页面出现双语字幕时读取其英文原文行；只读观察字幕，不修改页面 DOM。</li>
+<li><strong>其他字幕来源</strong>：页面提供可读且启用的标准 TextTrack 时按字幕事件增量读取。YouTube 还可通过原生字幕兜底请求整条字幕轨，可能提前包含尚未播放的内容。不同网站和字幕轨的可读取性不同。</li>
 <li><strong>实时累积，不是一次性全量</strong>：沉浸式翻译只渲染"当前这一句"字幕，所以单词是边看边收集的。想收集完整个视频的词，就得把视频看完（或快进）。</li>
 <li><strong>斩词是全局的</strong>：斩掉一个词，它<strong>立刻从「当前视频」列表里消失</strong>，以后所有视频里也不再出现。想恢复去「已斩词」标签页点 ✕。</li>
-<li><strong>时间点每 3 分钟记一次，最多 10 个</strong>：一个词在 0:00~3:00 之间出现多少次都只记一个 <code>0:00</code>，下一个记到 3:00、6:00、9:00……这样列表不会刷屏，又能大致定位原句。</li>
-<li><strong>记词题全部离线</strong>：4590 个词的题库（正确释义 + 3 个形近/易混的干扰释义）已经打包在扩展里，<strong>出题和判分都在本机，不联网</strong>；发音走系统语音合成，同样不联网。</li>
+<li><strong>时间点最多 10 个</strong>：每词保留最早的 10 个不同时间点，精度沿用字幕来源，标准字幕轨可精确到 0.1 秒。</li>
+<li><strong>记词题在本机</strong>：题库覆盖三词库词头并集 6,043 词；保留上游 4,590 道四级题，另有 1,453 道根据公开释义整理的补充题。补充题由程序生成，尚未逐题人工语义审校；查看扩展「词表来源」页了解许可与来源。没有题目时仍可点击「详解」。</li>
+<li><strong>朗读只使用本地英语音色</strong>：没有可用本地音色时会显示提示，答题不受影响。</li>
 <li><strong>词形还原</strong>：<code>studies</code>/<code>studying</code>/<code>studied</code> 会匹配到词根 <code>study</code>，列表按字幕原样显示。</li>
 </ol>
 <hr>
@@ -155,7 +157,7 @@
 <li>开源词库 <code>github.com/eeliu/english-vocabulary</code> 的「四级-乱序」表（4538 词，进阶核心词）</li>
 <li>手动补充 52 个基础高频词（<code>study</code>/<code>run</code>/<code>take</code>/<code>write</code> 等四级必考但原表剔除的基础词）</li>
 </ol>
-<p><strong>题库</strong>：另有 <code>quiz_bank.json</code>，为这 4590 个词各准备了 3 个「形近 / 同词性 / 易混淆」的干扰释义（例如 <code>access</code> 配 <code>accent</code>、<code>actress</code>、<code>accuse</code>；<code>clean</code> 配 <code>clear</code>、<code>clever</code>、<code>lean</code>）。它由 <code>cet4_words.json</code> 离线生成并打包在扩展内，<strong>出题不需要联网</strong>。</p>
+<p><strong>题库</strong>：上游四级题库 <code>quiz_bank.json</code> 保留原样；<code>quiz_extras.json</code> 补足三词库并集的题目。缺失词释义来自固定版本的 ECDICT；干扰项由脚本按词性和释义差异整理。IELTS 旧词头 <code>inasmuchas</code> 兼容字幕短语 <code>inasmuch as</code>，释义根据固定版本 Wiktionary 英文义项整理。补充题未经逐题人工语义审校，来源、许可、版本和哈希见扩展「词表来源」页及 <code>quiz-sources.json</code>。出题不需要联网。</p>
 <p>如果你想要更全的词表，可以自行替换 <code>cet4_words.json</code>（格式：<code>{"word": "释义", ...}</code>），改完在 <code>chrome://extensions/</code> 里点扩展的「刷新」按钮。</p>
 <p><strong>联网查词</strong>：点「详解」时才会调用 <a href="https://dictionaryapi.dev/">Free Dictionary API</a>（免费、无需 key）获取音标、多词性释义、例句。查不到会自动切 Wiktionary。需要联网。</p>
 <hr>
@@ -163,7 +165,7 @@
 <ul>
 <li>只支持 <strong>字幕</strong>，不支持纯语音识别（语音转文字需要联网 API + 付费，暂不做）。</li>
 <li>时间点为<strong>文字</strong>展示（mm:ss），不做点击跳转。</li>
-<li>点单词发音依赖<strong>系统自带的英文语音包</strong>（Windows / macOS 都自带）。系统里若没有英文语音则会没声音，但不影响其他功能。</li>
+<li>测试模式发音依赖<strong>可用的本地英语音色</strong>；扩展不会选择远程音色，没有可用本地音色时会提示。</li>
 <li>第一次打开某个视频可能要等字幕加载完（通常 1~3 秒），没抓到就点「重新抓取」。</li>
 </ul>
 </main>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>词表来源 · 奶娃过四级</title>
+  <style>
+    body { max-width: 820px; margin: 40px auto; padding: 0 24px; font: 16px/1.8 system-ui, "Microsoft YaHei", sans-serif; color: #1f2328; }
+    h1 { font-size: 26px; } h2 { font-size: 20px; margin-top: 30px; }
+    a { color: #4f46e5; overflow-wrap: anywhere; }
+    .note { padding: 14px 18px; background: #fff3db; border-radius: 8px; }
+    footer { border-top: 1px solid #e5e7eb; margin-top: 32px; padding-top: 16px; font-size: 14px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>词表来源与许可</h1>
+  <p>标签表示单词命中本扩展内置的学习词表，不表示该单词仅属于某项考试，也不保证覆盖考试全部词汇。重叠的词会显示所有命中标签。</p>
+  <h2>四级 · 4,590 词</h2>
+  <p>沿用项目原有词库：<a href="https://github.com/eeliu/english-vocabulary" target="_blank" rel="noopener">eeliu/english-vocabulary</a> 的「四级-乱序」4,538 词，加原项目补充的 52 个基础高频词。保留已有中文释义。</p>
+  <h2>六级 · 2,219 词</h2>
+  <p>作者：OpenEtymology；词表：<a href="https://github.com/openetymology/OpenEtymology/blob/7d89f3697abf26e305fe2627f181b692c2c10b28/CET6/CET6.txt" target="_blank" rel="noopener">OpenEtymology CET6</a>。源版本：7d89f3697abf26e305fe2627f181b692c2c10b28。</p>
+  <p>原公开词表及本项目整理后的 <a href="cet6_words.json">cet6_words.json</a> 使用 <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">Creative Commons Attribution-ShareAlike 4.0 International（CC BY-SA 4.0）</a>。变更：词头转小写、排序、转为 JSON；没有新增释义。<a href="licenses/cet6-LICENSE.txt">上游原始数据许可声明</a>。</p>
+  <h2>雅思选项 · 1,000 词</h2>
+  <p class="note">这是社区整理、含 AI 增补内容的 TOEFL / IELTS 共用学术词表，非官方雅思词表，非雅思专属。英文释义来自原数据，可能需要人工核对。</p>
+  <p>作者：gungorkaya-eng / <a href="https://wordlevel.net" target="_blank" rel="noopener">WordLevel</a>；来源：<a href="https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset/blob/85d4392a2254d2a1ad73cf12cdd8898b49cd3295/toefl_essential_vocabulary.json" target="_blank" rel="noopener">TOEFL &amp; IELTS Essential Vocabulary Dataset</a>。源版本：85d4392a2254d2a1ad73cf12cdd8898b49cd3295。</p>
+  <p>使用 <a href="licenses/ielts-LICENSE.txt">MIT License（含原版权与许可全文）</a>。变更：词头转小写、排序、只提取词头、词性与原英文释义；未生成中文翻译。</p>
+  <h2>测试题来源与覆盖</h2>
+  <p>三词库词头并集为 6,043 个词。题目覆盖：四级 4,590/4,590、六级 2,219/2,219、雅思 1,000/1,000。上游四级题库的 <a href="https://github.com/JETGO-BLUE/naiwa-cet4/blob/ea6f10676e923d3a3a5d3bd4e848942319bda170/quiz_bank.json" target="_blank" rel="noopener">4,590 条题目</a>按固定提交 ea6f10676e923d3a3a5d3bd4e848942319bda170（获取日期：2026-10-12）保留原文件，适用仓库 MIT 许可并保留来源署名。</p>
+  <p>六级和雅思缺口中，1,452 个词使用 <a href="https://github.com/skywind3000/ECDICT/tree/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b" target="_blank" rel="noopener">ECDICT</a> 固定提交 bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b 的中文 translation 字段。获取日期：2026-10-12。原始 ecdict.csv SHA-256：<code>1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf</code>；许可为 ECDICT 仓库声明的 MIT，版权署名 Linwei (2025)，全文见 <a href="licenses/ecdict-LICENSE.txt">ECDICT MIT License</a>。<a href="https://github.com/skywind3000/ECDICT/blob/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/README.md" target="_blank" rel="noopener">README</a> 说明该词典是多来源汇编，单行没有逐条上游出处记录；本项目依据仓库级 MIT 声明复用，并保留这一来源溯源限制。</p>
+  <p>遗留雅思词头 <code>inasmuchas</code> 是短语 <code>inasmuch as</code> 的连写。为兼容旧词卡，保留旧词头并匹配正常短语。中文释义由项目维护者依据 <a href="https://en.wiktionary.org/w/index.php?title=inasmuch_as&amp;oldid=91768332" target="_blank" rel="noopener">English Wiktionary 词条修订 91768332</a> 中的英文释义整理；归属 English Wiktionary contributors。获取日期：2026-10-12。该内容依据 <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>，许可文本见 <a href="licenses/CC-BY-SA-4.0.txt">CC BY-SA 4.0 License</a>。API 快照 SHA-256：<code>8b2d11955cc46163c87841293da822d1795ee44e0b3d8d3b4e1e7e8a15c8b034</code>。</p>
+  <p>对于 1,452 道新增题，正确释义取所固定词典中的第一条带词性中文义项；三个干扰释义按词性匹配，从三词库候选释义中去重，并以共享汉字比例过滤相似项。兼容短语的三个干扰项按连词词性同样整理。题目和干扰项由脚本生成，尚未经逐题人工语义复核；统计和结构校验不等于人工质量保证。ECDICT 未提供 <code>inasmuchas</code> 这一旧词头，由上述短语来源单独处理；三词库没有未覆盖词。</p>
+  <p>固定提交、获取日期、源与输出哈希、规则、覆盖数、缺项和审校状态见 <a href="quiz-sources.json">题库来源元数据</a>。可用项目脚本 <code>scripts/build-quiz-extras.py</code> 重建补充题，<code>scripts/validate-quiz-data.py</code> 校验覆盖和结构；扩展运行时不会下载这些数据。</p>
+  <h2>释义与更新</h2>
+  <p>重叠词优先使用已有四级中文释义，其次使用共用学术词表英文释义。仅命中六级且没有本地释义的词，可点击单词联网查询。词表打包在扩展内，识别时无需联网下载。</p>
+  <p>采集日期：2026-10-10。源文件和整理文件的 SHA-256、固定源版本及条目数见 <a href="vocabulary-sources.json">来源元数据</a>。项目中的 scripts/import-vocabularies.py 可从固定版本重建两份新增词表。</p>
+  <footer>代码许可与各数据来源许可分别适用。请在改编或分发时遵循对应来源许可，并保留所需署名及许可声明。</footer>
+</body>
+</html>

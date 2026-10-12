@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>奶娃过四级 · 看视频顺便攒四级词汇</title>
-<meta name="description" content="奶娃过四级：Chrome / Edge 浏览器扩展。自动抓取视频字幕中的四级词汇，每 3 分钟标注时间点、四选一记词可点读发音、查看单词变形、一键斩掉熟悉词。">
+<title>奶娃过四级 · 看视频顺便积累英语词汇</title>
+<meta name="description" content="奶娃过四级：Chrome / Edge 浏览器扩展。自动抓取字幕中的四级、六级和雅思词汇，可选普通查词或中文四选一测试，记录时间点并管理熟悉词。">
 <style>
   :root{
     --bg:#fbfaf8;
@@ -148,7 +148,7 @@
     <span class="badge">Chrome / Edge 扩展 · 免费开源</span><br>
     <img class="logo" src="store-assets/store-logo-300.png" alt="奶娃过四级">
     <h1>奶娃过四级</h1>
-    <p class="tag">看视频的时候，把四级词汇悄悄攒起来 —— 自动抓取字幕里的 CET-4 单词，每 3 分钟标时间点、四选一记词、查变形、一键斩掉熟悉词。</p>
+    <p class="tag">看视频的时候，把四级、六级和雅思学习词汇悄悄攒起来 —— 可选普通查词或中文四选一测试，保留字幕时间点并标记熟悉词。</p>
     <div class="btns">
       <a class="btn btn-primary" href="#install">📦 安装使用</a>
       <a class="btn btn-ghost" href="privacy.html">🔒 隐私政策</a>
@@ -157,28 +157,28 @@
 </div>
 
 <section class="wrap">
-  <h2>你每天刷的视频，其实藏着大量四级词汇</h2>
+  <h2>你每天刷的视频，其实藏着大量英语词汇</h2>
   <p class="lead">可惜看完就忘，一个都没留下。这个扩展帮你把它们捞出来。</p>
   <div class="grid">
     <div class="card">
       <div class="ico">🎯</div>
       <h3>自动抓词</h3>
-      <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕，没开也能抓 YouTube 原生字幕。</p>
+      <p>播放时增量读取可见英文字幕和标准字幕轨；YouTube 还可请求原生字幕整轨，可能提前包含未播放内容。</p>
     </div>
     <div class="card">
       <div class="ico">⏱️</div>
-      <h3>每 3 分钟记一次时间点</h3>
-      <p>同一个词在 3 分钟区间内出现多少次都只记一次（0:00 / 3:00 / 6:00…），最多 10 个 —— 能定位原句，又不会把列表刷满。</p>
+      <h3>记录字幕时间点</h3>
+      <p>按字幕采集精度记录时间（最多到 0.1 秒），每词保留最早的 10 个不同时间点，方便回看原句。</p>
     </div>
     <div class="card">
       <div class="ico">🎧</div>
-      <h3>四选一记词</h3>
-      <p>不直接给中文释义：单击单词听发音，再从 4 个中文释义里选。选错标 ❌，选对才亮出答案。4590 词的题库全在本机，出题不联网。</p>
+      <h3>普通模式与测试模式</h3>
+      <p>四级、六级或雅思每次选择一个词库。两种模式都会隐藏基础词；普通模式显示释义，测试模式单击单词朗读并做中文四选一。两种模式共享记录。</p>
     </div>
     <div class="card">
       <div class="ico">🗡️</div>
       <h3>一键「斩」</h3>
-      <p>认识？点一下「斩」，这个词立刻从列表里消失。越用越清爽，专注那些你还不熟的词。</p>
+      <p>认识？点一下「斩」，这个词立刻从待学列表消失。需要时可在「已斩词」页撤销；答对题目不会自动斩词。</p>
     </div>
     <div class="card">
       <div class="ico">📖</div>
@@ -193,7 +193,7 @@
     <div class="card">
       <div class="ico">🌐</div>
       <h3>不局限于 YouTube</h3>
-      <p>纯只读监听页面字幕元素，不修改页面、不影响翻译扩展、不影响你看视频。</p>
+      <p>在字幕身份可确认的平台按视频累加记录；无法确认时单独建档，不按页面路径盲目合并。</p>
     </div>
   </div>
 </section>
@@ -255,10 +255,10 @@
   <div class="privacy">
     <h2>🔒 隐私优先</h2>
     <ul>
-      <li>✅ 字幕文本<strong>只在你的浏览器本地处理</strong>，不上传（我们根本没有服务器）</li>
-      <li>✅ 只有你<strong>主动点击</strong>单词时，才把<strong>那个单词本身</strong>发给公开词典接口</li>
+      <li>✅ 字幕匹配在本地处理；YouTube 原生兜底会向 YouTube 请求字幕轨，可能下载整轨</li>
+      <li>✅ 只有你<strong>主动点击</strong>单词时，才向公开词典请求该查询词</li>
       <li>✅ 「已斩词」和收集记录保存在浏览器本地，不离开你的设备</li>
-      <li>✅ 无需登录、无广告、无追踪、无统计分析</li>
+      <li>✅ 朗读仅选本地英语音色，没有音色时提示；不上传字幕到扩展运营方、不发送遥测</li>
     </ul>
     <p style="margin:18px 0 0"><a href="privacy.html" style="color:#2f7d52;font-weight:600">查看完整隐私政策 →</a></p>
   </div>
@@ -269,7 +269,8 @@
     <p>
       <a href="https://github.com/JETGO-BLUE/naiwa-cet4">GitHub 仓库</a> ·
       <a href="privacy.html">隐私政策</a> ·
-      <a href="使用说明.html">使用说明</a>
+      <a href="使用说明.html">使用说明</a> ·
+      <a href="https://github.com/neverholdm/naiwa-cet4/blob/main/vocabulary-sources.html">词表与题库来源</a>
     </p>
     <p>© 2026 奶娃过四级 · MIT License · 与 YouTube、Microsoft、沉浸式翻译等第三方无任何关联</p>
   </div>
