@@ -20,6 +20,11 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: 校验 manifest.json 与词表 JSON 格式
         run: |
           node -e "
@@ -37,7 +42,7 @@ jobs:
           console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
 
           // ---- 扩展必需文件 ----
-          const required = ['background.js','content.js','youtube-bridge.js','popup.html','popup.js','cet4_words.json','cet6_words.json','ielts_words.json','vocabulary-sources.json','vocabulary-sources.html','licenses/cet6-LICENSE.txt','licenses/ielts-LICENSE.txt','scripts/test-subtitle-pipeline.js'];
+          const required = ['background.js','content.js','youtube-bridge.js','popup.html','popup.js','cet4_words.json','cet6_words.json','ielts_words.json','quiz_bank.json','quiz_extras.json','quiz-sources.json','vocabulary-sources.json','vocabulary-sources.html','licenses/cet6-LICENSE.txt','licenses/ielts-LICENSE.txt','licenses/ecdict-LICENSE.txt','licenses/CC-BY-SA-4.0.txt','scripts/build-quiz-extras.py','scripts/validate-quiz-data.py','scripts/test-subtitle-pipeline.js'];
           for (const f of required) {
             if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
           }
@@ -84,3 +89,6 @@ jobs:
 
       - name: 合并、重发、恢复和竞争写入 Mock 验证
         run: node scripts/test-subtitle-pipeline.js
+
+      - name: 三词库题库覆盖、结构、来源与许可校验
+        run: python scripts/validate-quiz-data.py

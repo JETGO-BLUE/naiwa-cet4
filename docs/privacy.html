@@ -80,7 +80,7 @@
       <p class="sub">奶娃过四级 · Naiwa CET-4 Collector</p>
     </div>
   </header>
-  <div class="meta">最后更新：2026 年 10 月 11 日</div>
+  <div class="meta">最后更新：2026 年 10 月 12 日</div>
 
   <div class="card">
     <div class="lang-tag">中文版</div>
@@ -99,7 +99,8 @@
         </ul>
         查询词会出现在请求地址中；扩展不会附带当前视频字幕或视频页面地址。第三方服务可能按其政策处理请求和常规网络元数据。
       </li>
-      <li><strong>本地设置和记录</strong>：熟悉词、匹配词卡、时间点和历史记录保存在浏览器本地存储（<code>chrome.storage.local</code>）。原始字幕不会作为长期记录保存。页面仍打开时，尚未获得本地保存确认的短期输入缓存保留在页面内存中；页面与浏览器同时突然关闭前的最后一小段未确认输入可能丢失。</li>
+      <li><strong>测试题与朗读</strong>：测试题数据随扩展本地打包，选择和判分在本地完成。单词朗读只使用浏览器标记为本地服务的英语音色；没有可用音色时扩展会提示，不会选择远程音色。</li>
+      <li><strong>本地设置和记录</strong>：所选词库、学习模式、熟悉词、匹配词卡、时间点和历史记录保存在浏览器本地存储（<code>chrome.storage.local</code>）。原始字幕不会作为长期记录保存。页面仍打开时，尚未获得本地保存确认的短期输入缓存保留在页面内存中；页面与浏览器同时突然关闭前的最后一小段未确认输入可能丢失。</li>
       <li><strong>本地计时</strong>：字幕回调、匹配、保存和弹窗更新耗时可保存在本地内存中用于调试，不上传遥测或分析。</li>
     </ol>
 
@@ -141,7 +142,7 @@
     <p>如本政策有更新，我们会在本页面更新「最后更新」日期。</p>
 
     <h2>八、联系方式</h2>
-    <p>如有疑问，请联系：<strong><a href="mailto:3313896862@qq.com">3313896862@qq.com</a></strong></p>
+    <p>如有疑问或想反馈问题，欢迎到 <a href="https://github.com/JETGO-BLUE/naiwa-cet4/issues" target="_blank" rel="noopener">GitHub Issues</a> 提交，我们会尽快回复。</p>
   </div>
 
   <hr>
@@ -157,7 +158,8 @@
     <ol>
       <li><strong>Subtitle text</strong>: Immersive Translate and readable standard English text tracks are processed locally. The YouTube native-caption fallback requests the selected English caption track from YouTube and may download the entire track, including unplayed sections. We have no server; subtitles are not uploaded to the extension operator. YouTube requests remain subject to YouTube's own terms and privacy policy.</li>
       <li><strong>Word lookups</strong>: When you manually click a word, the query appears in requests to <code>api.dictionaryapi.dev</code> and, if needed, <code>en.wiktionary.org</code>. The extension does not include the current video's subtitles or page URL. Those services may process the request and ordinary network metadata under their policies.</li>
-      <li><strong>Local settings and records</strong>: Your familiar-word list, matched word cards, timestamps, and history are stored in <code>chrome.storage.local</code>. Raw subtitles are not kept as long-term records. While the page remains open, unconfirmed input is held temporarily in page memory; the last unconfirmed portion may be lost if the page and browser close unexpectedly at the same time.</li>
+      <li><strong>Quiz and speech</strong>: Quiz data is bundled with the extension and answers are checked locally. Speech uses only English voices that the browser identifies as local services; if none are available, the extension displays a notice and does not select a remote voice.</li>
+      <li><strong>Local settings and records</strong>: Your selected vocabulary, learning mode, familiar-word list, matched word cards, timestamps, and history are stored in <code>chrome.storage.local</code>. Raw subtitles are not kept as long-term records. While the page remains open, unconfirmed input is held temporarily in page memory; the last unconfirmed portion may be lost if the page and browser close unexpectedly at the same time.</li>
       <li><strong>Local timing</strong>: Capture, matching, saving, and popup-update timings may be kept in local memory for debugging. They are not uploaded as telemetry or analytics.</li>
     </ol>
 
@@ -198,7 +200,7 @@
     <p>Any updates to this policy will be reflected in the "Last updated" date above.</p>
 
     <h2>8. Contact</h2>
-    <p>For questions, contact: <strong><a href="mailto:3313896862@qq.com">3313896862@qq.com</a></strong></p>
+    <p>For questions or bug reports, please open an issue at <a href="https://github.com/JETGO-BLUE/naiwa-cet4/issues" target="_blank" rel="noopener">GitHub Issues</a>. We will get back to you as soon as possible.</p>
   </div>
 
   <footer>

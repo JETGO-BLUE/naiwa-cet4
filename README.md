@@ -2,11 +2,11 @@
 
 > 看视频的时候，把四级、六级和雅思学习词汇悄悄攒起来。
 
-[![Version](https://img.shields.io/badge/version-1.2.0-c2572a)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.3.0-c2572a)](manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
 [![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
 
-一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级、六级和雅思学习词表中的英文单词**，每次选择一个词库查看，展示全部命中标签，去重、标注出现时间点、一键查看单词变形与释义，还能把已经熟悉的词「斩」掉。
+一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级、六级和雅思学习词表中的英文单词**，每次选择一个词库查看。可在普通模式查词，或在测试模式做中文四选一；两种模式共用同一份字幕记录和熟悉词列表。
 
 <p align="center">
   <img src="icons/icon128.png" width="110" alt="奶娃过四级">
@@ -23,16 +23,22 @@
 | **弹窗自动更新** | 弹窗保持打开时收到新词卡，不打断搜索、滚动或详情查看 |
 | **单选词库** | 四级 / 六级 / 雅思每次选一项，记住上次选择；当前列表、历史词数和已斩词随选择筛选 |
 | **全部命中标签** | 重叠词显示全部类别，例如「六级」「雅思」；采集保存三份词库并集，切换无需重新抓取 |
-| **去重 + 时间点** | 同一个词只列一次，记录它在视频里出现的位置（`mm:ss`；字幕轨可精确到 0.1 秒），最多显示前 10 个 |
+| **普通 / 测试模式** | 普通模式隐藏基础词并显示释义；测试模式包含基础词，提供本地中文四选一和答题反馈 |
+| **去重 + 精确时间点** | 同一个词只列一次，按字幕采集精度记录时间（最多到 0.1 秒），保留每词最早的 10 个不同时间点 |
 | **一键「斩」** | 标记为熟悉词后，词卡变灰并计入已斩；三个词库共享熟悉词记录 |
 | **点击查详情** | 点任意单词 → 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
+| **本地朗读** | 测试模式点击单词只选本地英语音色；没有可用音色时会提示 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
 | **只读不打扰** | 纯只读监听页面字幕元素，不修改任何页面内容，不影响翻译扩展与视频播放 |
 | **身份不确定时隔离** | 非 YouTube 页面无法确认视频身份时按页面连接单独记录并保留历史；重开可能产生另一份记录，不会按路径盲目合并 |
 
 ## 显示规则
 
-内置词表保留完整数据，但界面会自动隐藏常见基础词及其变形，例如冠词、代词、介词、连词以及 `be`、`go`、`have`、`do` 等基础词。原始采集记录仍保存在本地，调整过滤名单后可以恢复显示。
+普通模式会隐藏常见基础词及其变形，例如冠词、代词、介词、连词以及 `be`、`go`、`have`、`do` 等基础词。测试模式包含这些词。基础词保留在原始采集记录中；两种模式切换不会重新采集或清空记录。
+
+测试模式按词形原型匹配题目，例如字幕词形 `studies` 使用 `study` 的题目，卡片仍显示 `studies`。选错会标记该选项，答对后显示释义并完成本次题目；要从待学列表隐藏熟悉词，仍需点「斩」，可在「已斩词」页撤销。个别词可能没有题目，此时仍可用「详解」查询。
+
+题目覆盖三词库词头并集 **6,043 词**：保留上游四级的 4,590 道题，另由固定版本公开释义整理 1,453 道补充题。新增题目目前为程序整理，尚未逐题人工审校；来源、许可、提交、校验值、缺口和生成规则见 [题库来源与许可](vocabulary-sources.html) 及 [`quiz-sources.json`](quiz-sources.json)。
 
 默认选择四级。六级新增 **2,219 词**，雅思选项新增 **1,000 词**；雅思使用社区整理的 **TOEFL / IELTS 共用学术词表，非官方、非雅思专属**。标签表示命中内置词表。旧记录只能为已保存的四级词补标签，重新抓取可补充以前未收集的六级和雅思词。
 
@@ -74,8 +80,11 @@
 ├── cet6_words.json        # 六级词表（2219 词，CC BY-SA 4.0）
 ├── ielts_words.json       # TOEFL/IELTS 共用学术词表（1000 词，MIT）
 ├── vocabulary-sources.*   # 来源版本、校验值、面向用户的署名页面
-├── licenses/              # 新增词表的原数据许可声明
-├── scripts/               # 固定源版本与哈希的词表重建脚本
+├── quiz_bank.json         # 上游四级题库
+├── quiz_extras.json      # 六级/雅思缺口与短语兼容题
+├── quiz-sources.json     # 题库来源、许可、版本、校验值和覆盖统计
+├── licenses/              # 词表与题库来源许可声明
+├── scripts/               # 数据重建、覆盖与字幕链路验证脚本
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
@@ -107,8 +116,9 @@ background.js
   ├─ 立即通知弹窗；独立合并本地写入并在成功后确认页面输入
   └─ chrome.storage.local 持久保存；每个词最多保留前 10 个不同时间点
         ↓
-popup.js  按所选词库渲染单词列表 / 详情 / 斩词 / 历史
-          点击单词 → LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
+popup.js  按所选词库和学习模式渲染词卡 / 题卡 / 详情 / 斩词 / 历史
+          测试题由 background.js 从本地 quiz_bank.json 和 quiz_extras.json 统一提供
+          点击详解 → LOOKUP_LOCAL（本地释义）→ LOOKUP_ONLINE（补释义）
 ```
 
 ### 隐私
@@ -116,6 +126,7 @@ popup.js  按所选词库渲染单词列表 / 详情 / 斩词 / 历史
 - 沉浸式翻译和标准字幕轨只在本地处理。YouTube 原生字幕兜底会向 YouTube 请求字幕轨，可能下载整条字幕并包含尚未播放的部分；字幕和匹配结果不会上传到本扩展的服务器（本扩展没有服务器）。
 - 只有你**主动点击**某个单词时，才把**该单词本身**发给公开词典接口（`api.dictionaryapi.dev`、`en.wiktionary.org`）。
 - 「已斩词」和收集记录保存在 `chrome.storage.local`，不离开设备。
+- 朗读仅使用浏览器标记为本地服务的英语音色；没有本地英语音色时不会尝试远程音色。
 - 原始字幕不会作为长期记录保存；页面仍存活时，尚未获得本地写入确认的短期缓存留在页面内存中。浏览器与页面同时突然关闭前最后一小段未确认内容可能丢失。
 - 无登录、无广告、无追踪；本地阶段计时不发送遥测。
 
@@ -143,11 +154,11 @@ cd naiwa-cet4
 
 ```bash
 # 打完 tag 推送，GitHub Actions 会自动产出 zip 到 Release
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
-也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`youtube-bridge.js`、`popup.html`、`popup.js`、三份 `*_words.json`、`vocabulary-sources.json`、`vocabulary-sources.html`、`licenses/`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
+也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`youtube-bridge.js`、`popup.html`、`popup.js`、三份 `*_words.json`、`quiz_bank.json`、`quiz_extras.json`、`vocabulary-sources.json`、`vocabulary-sources.html`、`quiz-sources.json`、`licenses/`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
 
 ---
 
@@ -159,7 +170,7 @@ git push origin v1.2.0
 
 ## 许可
 
-项目代码使用 [MIT](LICENSE)。新增六级词表及其格式改编使用 **CC BY-SA 4.0**，雅思选项的共用学术词表使用 **MIT**；数据许可、原版权及署名见 [词表来源](vocabulary-sources.html) 和 `licenses/`。
+项目代码使用 [MIT](LICENSE)。新增六级词表及其格式改编使用 **CC BY-SA 4.0**，雅思选项的共用学术词表和 ECDICT 来源释义使用其声明的 **MIT**；短语释义基于 English Wiktionary 并按 **CC BY-SA 4.0** 标注。详细数据许可、原版权及署名见 [词表与题库来源](vocabulary-sources.html) 和 `licenses/`。
 
 ---
 

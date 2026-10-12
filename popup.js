@@ -14,13 +14,20 @@ let captureState = null;
 let perfSummary = null;
 let historyRequest = 0;
 let initRequest = 0;
+let navigationRequest = 0;
 let familiarWords = [];
 let familiarEntries = [];
 let selectedVocabulary = 'cet4';
+let learningMode = 'normal';
 const VOCABULARY_LABELS = { cet4: '四级', cet6: '六级', ielts: '雅思' };
 let uiError = '';
 let currentTab = 'current';
 let searchKeyword = '';
+let quizContextVersion = 0;
+const quizCache = new Map();
+const quizState = new Map();
+let voiceNotice = null;
+let detailRequest = 0;
 
 // 发送消息到 background（Promise 包装）
 function send(msg) {
@@ -58,9 +65,12 @@ let contentDebug = null; // content 返回的诊断信息
 async function init() {
   const requestId = ++initRequest;
   const picker = document.getElementById('vocabularySelect');
+  const modePicker = document.getElementById('learningModeSelect');
   picker.disabled = true;
+  modePicker.disabled = true;
   const settings = await send({ type: 'GET_VOCABULARY' });
   picker.disabled = false;
+  modePicker.disabled = false;
   if (!settings.ok) {
     uiError = settings.error;
     lastStatus = { type: 'error', error: settings.error };
@@ -69,6 +79,9 @@ async function init() {
   }
   selectedVocabulary = settings.selectedVocabulary;
   picker.value = selectedVocabulary;
+  learningMode = settings.learningMode === 'quiz' ? 'quiz' : 'normal';
+  modePicker.value = learningMode;
+  quizContextVersion += 1;
   uiError = '';
   currentRecord = null;
   const familiar = await send({ type: 'GET_FAMILIAR' });
@@ -132,6 +145,16 @@ function selectedWords(words) {
   return (words || []).filter((item) => (item.categories || []).includes(selectedVocabulary));
 }
 
+function modeWords(words) {
+  const selected = selectedWords(words);
+  return learningMode === 'normal' ? selected.filter((item) => !item.isBasic) : selected;
+}
+
+function activeWords(words) {
+  const slashed = new Set(familiarWords);
+  return modeWords(words).filter((item) => !slashed.has(item.word));
+}
+
 function vocabularyTags(categories) {
   return '<span class="vocabulary-tags">' + (categories || [])
     .filter((category) => Object.hasOwn(VOCABULARY_LABELS, category))
@@ -141,7 +164,9 @@ function vocabularyTags(categories) {
 
 function renderVocabularyStatus() {
   const status = document.getElementById('vocabularyStatus');
-  status.textContent = uiError || (selectedVocabulary === 'ielts'
+  status.textContent = uiError || (learningMode === 'quiz'
+    ? '测试模式含基础词；答对仅完成本题，熟悉词请点「斩」'
+    : selectedVocabulary === 'ielts'
     ? '社区学术词表，含 TOEFL 词汇，非官方'
     : '每次选择一个词库，词卡显示全部命中标签');
   status.classList.toggle('error', !!uiError);
@@ -237,6 +262,67 @@ function renderDebug() {
   );
 }
 
+function questionLemma(w) {
+  return String(w.lemma || w.word || '').toLowerCase();
+}
+
+function questionKey(w) {
+  return selectedVocabulary + ':' + questionLemma(w);
+}
+
+function getQuizState(key) {
+  if (!quizState.has(key)) quizState.set(key, { wrong: new Set(), solved: false });
+  return quizState.get(key);
+}
+
+function renderQuizBlock(w) {
+  const key = questionKey(w);
+  if (!quizCache.has(key)) return '<div class="quiz-loading">正在准备本地题目…</div>';
+  const question = quizCache.get(key);
+  if (!question) return '<div class="quiz-missing">该词暂无题目，可以点「详解」正常查词。</div>';
+  const state = getQuizState(key);
+  let html = '<div class="quiz">';
+  if (!state.solved) {
+    html += question.options.map((option, index) => {
+      const wrong = state.wrong.has(index);
+      const correct = index === question.correctIndex && state.solved;
+      const marker = wrong ? '✕' : correct ? '✓' : '';
+      return `<button class="opt quiz-option ${wrong ? 'wrong' : ''} ${correct ? 'correct' : ''}" data-word="${escapeHtml(w.word)}" data-choice="${index}" ${wrong ? 'disabled' : ''}>
+        <span class="idx">${String.fromCharCode(65 + index)}</span><span class="txt">${escapeHtml(option)}</span><span class="mark">${marker}</span>
+      </button>`;
+    }).join('');
+    html += '<div class="quiz-tip">单击单词朗读 · 选择中文释义</div>';
+  } else {
+    html += `<button class="answer-reveal" data-word="${escapeHtml(w.word)}"><span>✅ 本题完成 · 释义：<b>${escapeHtml(question.correct)}</b></span><span class="more">点此看详解 ▸</span></button>`;
+  }
+  if (voiceNotice && voiceNotice.word === w.word) html += `<div class="voice-status">${escapeHtml(voiceNotice.text)}</div>`;
+  html += '</div>';
+  return html;
+}
+
+async function ensureQuizzes(words) {
+  const category = selectedVocabulary;
+  const recordId = currentRecordId;
+  const contextVersion = quizContextVersion;
+  const lemmas = Array.from(new Set(words.map(questionLemma).filter(Boolean)));
+  const missing = lemmas.filter((lemma) => !quizCache.has(category + ':' + lemma));
+  if (!missing.length) return;
+  for (let offset = 0; offset < missing.length; offset += 500) {
+    const batch = missing.slice(offset, offset + 500);
+    const response = await send({ type: 'GET_QUIZ_BATCH', vocabulary: category, words: batch });
+    if (contextVersion !== quizContextVersion || category !== selectedVocabulary ||
+        recordId !== currentRecordId || learningMode !== 'quiz') return;
+    const quizzes = response && response.ok ? response.quizzes || {} : {};
+    for (const lemma of batch) quizCache.set(category + ':' + lemma, quizzes[lemma] || null);
+  }
+  const container = document.getElementById('currentContent');
+  for (const card of container.querySelectorAll('.word-card')) {
+    const word = (currentRecord && currentRecord.words || []).find((item) => item.word === card.getAttribute('data-word'));
+    const host = card.querySelector('.quiz-host');
+    if (word && host && (word.categories || []).includes(category)) host.innerHTML = renderQuizBlock(word);
+  }
+}
+
 function renderWordCard(w, slashedSet) {
   const isSlashed = slashedSet.has(w.word);
   const timesHtml = (w.times || []).slice(0, 10)
@@ -245,6 +331,23 @@ function renderWordCard(w, slashedSet) {
   const lemmaHint = w.lemma && w.lemma !== w.word
     ? `<span class="word-hint">→ ${escapeHtml(w.lemma)}</span>`
     : '';
+  if (learningMode === 'quiz') {
+    return `
+    <div class="word-card ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
+      <div class="word-head">
+        <div class="word-left">
+          <div class="word-text word-speak" data-word="${escapeHtml(w.word)}" title="点击单词朗读">${escapeHtml(w.word)}${lemmaHint}<span class="spk">🔊</span></div>
+          ${vocabularyTags(w.categories)}
+        </div>
+        <div class="word-actions">
+          <button class="mini-btn detail-btn" data-word="${escapeHtml(w.word)}">详解</button>
+          <button class="slash-btn ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">${isSlashed ? '已斩 ✓' : '斩'}</button>
+        </div>
+      </div>
+      <div class="quiz-host">${renderQuizBlock(w)}</div>
+      <div class="times">${timesHtml}</div>
+    </div>`;
+  }
   return `
     <div class="word-card ${isSlashed ? 'slashed' : ''}" data-word="${escapeHtml(w.word)}">
       <div class="word-head">
@@ -298,8 +401,9 @@ function renderCurrent() {
     return;
   }
 
-  const words = selectedWords(currentRecord.words);
+  const allWords = modeWords(currentRecord.words);
   const slashedSet = new Set(familiarWords);
+  const words = allWords.filter((word) => !slashedSet.has(word.word));
   const kw = searchKeyword.trim().toLowerCase();
 
   // 过滤
@@ -310,13 +414,13 @@ function renderCurrent() {
     return true;
   });
 
-  const slashedCount = words.filter((w) => slashedSet.has(w.word)).length;
-  const activeCount = words.filter((w) => !slashedSet.has(w.word)).length;
+  const slashedCount = allWords.length - words.length;
+  const activeCount = words.length;
 
   // 顶部统计
   let statsHtml = `
     <div class="stats">
-      <div class="stat"><b>${words.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
+      <div class="stat"><b>${allWords.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
       <div class="stat"><b>${activeCount}</b>待记</div>
       <div class="stat"><b>${slashedCount}</b>已斩</div>
     </div>`;
@@ -325,8 +429,13 @@ function renderCurrent() {
     statsHtml += '<p class="legacy-note">旧记录只采集过四级词，重新抓取可补全新词库。</p>';
   }
 
-  if (words.length === 0) {
+  if (allWords.length === 0) {
     container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到待学习的' + VOCABULARY_LABELS[selectedVocabulary] + '词汇<br/><span class="muted">基础词已自动隐藏；可切换词库查看其他命中</span></div>';
+    return;
+  }
+
+  if (words.length === 0) {
+    container.innerHTML = statsHtml + '<div class="empty"><div class="icon">🎉</div>当前模式下的词都已斩掉<br/>需要撤销时打开「已斩词」页，点击词条后的 ✕。</div>';
     return;
   }
 
@@ -337,17 +446,18 @@ function renderCurrent() {
 
   const cardsHtml = shown.map((word) => renderWordCard(word, slashedSet)).join('');
   container.innerHTML = statsHtml + cardsHtml;
+  if (learningMode === 'quiz') void ensureQuizzes(shown);
 }
 
 function refreshStatsOnly(container) {
   const stats = container.querySelector('.stats');
   if (!stats || !currentRecord) return false;
-  const words = selectedWords(currentRecord.words);
+  const allWords = modeWords(currentRecord.words);
   const slashedSet = new Set(familiarWords);
-  const active = words.filter((word) => !slashedSet.has(word.word)).length;
-  const slashed = words.length - active;
+  const active = allWords.filter((word) => !slashedSet.has(word.word)).length;
+  const slashed = allWords.length - active;
   const html = `<div class="stats">
-    <div class="stat"><b>${words.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
+    <div class="stat"><b>${allWords.length}</b>${VOCABULARY_LABELS[selectedVocabulary]}词</div>
     <div class="stat"><b>${active}</b>待记</div>
     <div class="stat"><b>${slashed}</b>已斩</div>
   </div>`;
@@ -403,10 +513,12 @@ function applyRecordDelta(message) {
       const slashedSet = new Set(familiarWords);
       for (const word of message.changedWords || []) {
         const matchesSelected = (word.categories || []).includes(selectedVocabulary);
+        const visibleInMode = learningMode === 'quiz' || !word.isBasic;
+        const notFamiliar = !familiarWords.includes(word.word);
         const query = searchKeyword.trim().toLowerCase();
         const matchesQuery = !query || word.word.toLowerCase().includes(query) || (word.meaning || '').toLowerCase().includes(query);
         const existing = Array.from(container.querySelectorAll('.word-card')).find((card) => card.getAttribute('data-word') === word.word);
-        if (!matchesSelected || !matchesQuery) {
+        if (!matchesSelected || !visibleInMode || !notFamiliar || !matchesQuery) {
           if (existing) existing.remove();
           continue;
         }
@@ -421,6 +533,7 @@ function applyRecordDelta(message) {
       if (needsFullRender || !refreshStatsOnly(container)) renderCurrent();
     }
     container.scrollTop = scrollTop;
+    if (learningMode === 'quiz') void ensureQuizzes(activeWords(currentRecord.words));
   } else if (currentTab === 'history') {
     renderHistory();
   }
@@ -444,6 +557,10 @@ function applyRecordDelta(message) {
 }
 
 async function loadActivePageRecord() {
+  const navigationId = ++navigationRequest;
+  quizContextVersion += 1;
+  detailRequest += 1;
+  document.getElementById('detailPanel').classList.remove('open');
   const targetId = activePageRecordId;
   if (!targetId) {
     currentRecordId = null;
@@ -453,8 +570,13 @@ async function loadActivePageRecord() {
     render();
     return;
   }
+  currentRecordId = targetId;
+  currentRecord = null;
+  currentVersion = 0;
+  persistedVersion = 0;
+  render();
   const response = await send({ type: 'GET_VIDEO', recordId: targetId });
-  if (currentTab !== 'current' || activePageRecordId !== targetId) return;
+  if (navigationId !== navigationRequest || currentTab !== 'current' || activePageRecordId !== targetId) return;
   currentRecordId = targetId;
   currentRecord = response && response.ok ? response.record : null;
   currentVersion = response && response.ok ? Number(response.version) || 0 : 0;
@@ -467,6 +589,8 @@ async function loadActivePageRecord() {
 // 渲染已斩词列表
 function renderFamiliar() {
   const container = document.getElementById('familiarContent');
+  // Keep familiar basic words visible here in every mode so users can undo
+  // words that were slashed while studying in quiz mode.
   const entries = selectedWords(familiarEntries);
   if (entries.length === 0) {
     container.innerHTML = '<div class="empty"><div class="icon">✂️</div>这个词库还没有已斩词<br/>在单词卡片上点「斩」即可标记为熟悉词</div>';
@@ -511,7 +635,7 @@ async function renderHistory() {
     html += `
       <div class="video-item" data-video="${escapeHtml(v.videoId)}">
         <div class="v-title">${escapeHtml(v.title || v.videoId)}</div>
-        <div class="v-meta">${selectedWords(v.words).length} 个${VOCABULARY_LABELS[selectedVocabulary]}词 · ${date}</div>
+        <div class="v-meta">${activeWords(v.words).length} 个待学词 · ${date}</div>
         ${v.isLegacyVocabulary && selectedVocabulary !== 'cet4' ? '<div class="v-meta">旧记录只含原四级采集结果</div>' : ''}
       </div>`;
   }
@@ -521,7 +645,12 @@ async function renderHistory() {
   container.querySelectorAll('.video-item').forEach((el) => {
     el.addEventListener('click', async () => {
       const videoId = el.getAttribute('data-video');
+      const navigationId = ++navigationRequest;
+      quizContextVersion += 1;
+      detailRequest += 1;
+      document.getElementById('detailPanel').classList.remove('open');
       const r = await send({ type: 'GET_VIDEO', videoId: videoId });
+      if (navigationId !== navigationRequest || currentTab !== 'history') return;
       if (r.ok && r.record) {
         currentRecord = r.record;
         currentRecordId = videoId;
@@ -574,9 +703,84 @@ document.getElementById('currentContent').addEventListener('click', async (event
     renderFamiliar();
     return;
   }
+  const quizOption = event.target.closest('.quiz-option');
+  if (quizOption) {
+    event.preventDefault();
+    event.stopPropagation();
+    const word = quizOption.getAttribute('data-word');
+    const wordData = currentRecord && (currentRecord.words || []).find((item) => item.word === word);
+    const key = wordData && questionKey(wordData);
+    const question = key && quizCache.get(key);
+    if (!question) return;
+    const state = getQuizState(key);
+    const choice = Number(quizOption.getAttribute('data-choice'));
+    if (state.solved || state.wrong.has(choice)) return;
+    if (choice === question.correctIndex) state.solved = true;
+    else state.wrong.add(choice);
+    const host = quizOption.closest('.word-card').querySelector('.quiz-host');
+    if (host && wordData) host.innerHTML = renderQuizBlock(wordData);
+    return;
+  }
+  const detailButton = event.target.closest('.detail-btn, .answer-reveal');
+  if (detailButton) {
+    event.stopPropagation();
+    openDetail(detailButton.getAttribute('data-word'));
+    return;
+  }
+  const speakButton = event.target.closest('.word-speak');
+  if (speakButton) {
+    event.stopPropagation();
+    speakWord(speakButton.getAttribute('data-word'));
+    return;
+  }
   const wordCard = event.target.closest('.word-clickable');
   if (wordCard) openDetail(wordCard.getAttribute('data-word'));
 });
+
+function showVoiceNotice(word, text) {
+  voiceNotice = { word, text };
+  const card = Array.from(document.querySelectorAll('#currentContent .word-card'))
+    .find((item) => item.getAttribute('data-word') === word);
+  if (!card) return;
+  let status = card.querySelector('.voice-status');
+  if (!status) {
+    status = document.createElement('div');
+    status.className = 'voice-status';
+    const host = card.querySelector('.quiz-host');
+    if (host) host.appendChild(status);
+  }
+  status.textContent = text;
+}
+
+function speakWord(word) {
+  const synth = window.speechSynthesis;
+  if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
+    showVoiceNotice(word, '浏览器不支持语音合成。');
+    return;
+  }
+  const voices = synth.getVoices() || [];
+  const voice = voices.find((item) => item.localService === true && /^en(?:-|$)/i.test(item.lang || ''));
+  if (!voice) {
+    showVoiceNotice(word, '没有可用的本地英语音色，无法朗读。');
+    return;
+  }
+  try {
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(String(word));
+    utterance.voice = voice;
+    utterance.lang = voice.lang || 'en-US';
+    utterance.rate = 0.9;
+    utterance.onerror = () => showVoiceNotice(word, '本地英语音色朗读失败。');
+    synth.speak(utterance);
+    voiceNotice = null;
+    const card = Array.from(document.querySelectorAll('#currentContent .word-card'))
+      .find((item) => item.getAttribute('data-word') === word);
+    const status = card && card.querySelector('.voice-status');
+    if (status) status.remove();
+  } catch (_) {
+    showVoiceNotice(word, '本地英语音色朗读失败。');
+  }
+}
 
 chrome.runtime.onMessage.addListener((message) => {
   if (!message || !message.type) return;
@@ -662,10 +866,33 @@ document.getElementById('vocabularySelect').addEventListener('change', async (e)
   picker.disabled = false;
   if (resp.ok) {
     selectedVocabulary = resp.selectedVocabulary;
+    quizContextVersion += 1;
+    detailRequest += 1;
+    document.getElementById('detailPanel').classList.remove('open');
+    voiceNotice = null;
     uiError = '';
   } else {
     picker.value = selectedVocabulary;
     uiError = resp.error;
+  }
+  render();
+});
+
+document.getElementById('learningModeSelect').addEventListener('change', async (event) => {
+  const picker = event.target;
+  picker.disabled = true;
+  const response = await send({ type: 'SET_LEARNING_MODE', learningMode: picker.value });
+  picker.disabled = false;
+  if (response && response.ok) {
+    learningMode = response.learningMode === 'quiz' ? 'quiz' : 'normal';
+    quizContextVersion += 1;
+    detailRequest += 1;
+    document.getElementById('detailPanel').classList.remove('open');
+    voiceNotice = null;
+    uiError = '';
+  } else {
+    picker.value = learningMode;
+    uiError = response && response.error || '切换学习模式失败';
   }
   render();
 });
@@ -719,7 +946,6 @@ document.getElementById('clearFamiliarBtn').addEventListener('click', async () =
 
 // ============ 单词详情弹窗 ============
 // 两阶段渲染：本地数据（原型/精简释义/单词变形/同根词）先秒出，联网释义后补
-let detailRequest = 0;
 async function openDetail(word) {
   const panel = document.getElementById('detailPanel');
   const request = ++detailRequest;

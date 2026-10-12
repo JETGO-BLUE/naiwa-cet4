@@ -4,6 +4,7 @@
 
 // ============ 1. 本地词表加载 ============
 const VOCABULARIES = ['cet4', 'cet6', 'ielts'];
+const LEARNING_MODES = ['normal', 'quiz'];
 let WORD_INDEX = null;
 let vocabularyLoad = null;
 let vocabularyLoadDurationMs = null;
@@ -63,10 +64,18 @@ async function filterRecordForDisplay(record) {
   const index = await loadVocabularies();
   const recordId = record.recordId || record.videoId || '';
   // 旧记录只补已有词的标签，不回写原始记录，也不假造未采集的词。
+  // 普通/测试模式过滤只发生在 popup 展示层；基础词始终留在原始数据中。
   const words = (record.words || []).map((item) => {
     const match = matchVocabulary(item.word, index);
-    return match ? { ...item, lemma: match.lemma, meaning: match.meaning || item.meaning || '', categories: match.categories } : item;
-  }).filter((item) => !isBasicWord(item.word, item.lemma));
+    const lemma = match ? match.lemma : item.lemma || item.word;
+    return {
+      ...item,
+      lemma: match ? match.lemma : item.lemma,
+      meaning: match ? match.meaning || item.meaning || '' : item.meaning || '',
+      categories: match ? match.categories : item.categories || [],
+      isBasic: isBasicWord(item.word, lemma),
+    };
+  });
   return {
     ...record,
     recordId: recordId,
@@ -83,8 +92,14 @@ async function getFamiliarWordsForDisplay() {
   const data = await chrome.storage.local.get('familiarWords');
   const index = await loadVocabularies();
   const entries = (data.familiarWords || []).map((word) => matchVocabulary(word, index))
-    .filter((match) => match && !isBasicWord(match.surface, match.lemma))
-    .map((match) => ({ word: match.surface, lemma: match.lemma, meaning: match.meaning, categories: match.categories }));
+    .filter(Boolean)
+    .map((match) => ({
+      word: match.surface,
+      lemma: match.lemma,
+      meaning: match.meaning,
+      categories: match.categories,
+      isBasic: isBasicWord(match.surface, match.lemma),
+    }));
   return { familiar: entries.map((item) => item.word), familiarEntries: entries };
 }
 
@@ -157,20 +172,41 @@ function lemmatize(word) {
 }
 
 // ============ 3. 多词库匹配（一次返回全部命中类别） ============
+const WORD_ALIASES = Object.freeze({
+  'inasmuch as': 'inasmuchas',
+  inasmuchas: 'inasmuchas',
+});
+const MEANING_OVERRIDES = Object.freeze({
+  inasmuchas: '由于；鉴于；因为（字幕短语：inasmuch as）',
+});
+
 function matchVocabulary(word, index) {
   const w = word.toLowerCase();
-  const lemma = index[w] ? w : lemmatize(w);
-  return index[lemma] ? { surface: w, lemma: lemma, ...index[lemma] } : null;
+  const lookup = WORD_ALIASES[w] || w;
+  const lemma = index[lookup] ? lookup : lemmatize(lookup);
+  return index[lemma] ? {
+    surface: w,
+    lemma: lemma,
+    ...index[lemma],
+    meaning: MEANING_OVERRIDES[lemma] || index[lemma].meaning,
+  } : null;
 }
 
 // 从一条字幕提取词库并集，保留 surface 和连字符词。
 function extractVocabularyWords(text, index) {
   const found = new Set();
-  const tokens = text.toLowerCase().replace(/’/g, "'").match(/[a-z]+(?:['-][a-z]+)*/g) || [];
+  let normalized = text.toLowerCase().replace(/’/g, "'");
+  // 兼容雅思来源中的历史词头 inasmuchas；字幕中的正常短语映射回旧词头。
+  for (const phrase of ['inasmuch as']) {
+    const matcher = /\binasmuch\s+as\b/g;
+    if (matcher.test(normalized)) found.add(phrase);
+    normalized = normalized.replace(matcher, ' ');
+  }
+  const tokens = normalized.match(/[a-z]+(?:['-][a-z]+)*/g) || [];
   for (const tok of tokens) {
     const parts = matchVocabulary(tok, index) ? [tok] : tok.split('-');
     for (const part of parts) {
-      if (part.length < 2) continue;
+      if (part.length < 1) continue;
       const match = matchVocabulary(part, index);
       if (match) found.add(match.surface);
     }
@@ -444,6 +480,15 @@ async function persistRecord(entry) {
       entry.retryDelay = 0;
       entry.dirty = entry.version > version;
       if (!entry.dirty) entry.dirtySince = 0;
+      const persistedEpoch = nowEpoch();
+      for (const id of eventIds) {
+        const pending = entry.pendingEventIds.get(id);
+        if (!pending) continue;
+        const duration = persistedEpoch - pending.capturedAtEpoch;
+        if (Number.isFinite(duration) && duration >= 0) {
+          addPerfSample({ saveMs: persistedEpoch - startedAt, captureToSaveMs: duration });
+        }
+      }
       sendPersisted(entry, eventIds, version);
       notifyPopup({
         type: 'RECORD_PERSISTED',
@@ -452,13 +497,6 @@ async function persistRecord(entry) {
         persistedVersion: entry.persistedVersion,
         savedAtEpoch: nowEpoch(),
       });
-      const persistedEpoch = nowEpoch();
-      for (const id of eventIds) {
-        const pending = entry.pendingEventIds.get(id);
-        if (!pending) continue;
-        const duration = persistedEpoch - pending.capturedAtEpoch;
-        if (Number.isFinite(duration) && duration >= 0) addPerfSample({ saveMs: persistedEpoch - startedAt, captureToSaveMs: duration });
-      }
       if (entry.dirty) scheduleSave(entry, 0);
       else trimRecordCache();
     } catch (error) {
@@ -616,7 +654,6 @@ async function ingestCaptionEvents(msg, sender, events) {
       }
       if (!entry.dirty) entry.dirtySince = Date.now();
       entry.dirty = true;
-      entry.saveRetries = 0;
       scheduleSave(entry);
     }
     const matchedAtEpoch = nowEpoch();
@@ -1020,23 +1057,153 @@ function findCognates(lemma, index) {
 }
 
 // ============ 6. 斩词 ============
+let familiarMutationQueue = Promise.resolve();
+
+function updateFamiliarWords(mutator) {
+  const task = familiarMutationQueue.then(async () => {
+    const data = await chrome.storage.local.get('familiarWords');
+    const list = Array.isArray(data.familiarWords) ? data.familiarWords.slice() : [];
+    const next = mutator(list);
+    await chrome.storage.local.set({ familiarWords: next });
+    return next;
+  });
+  familiarMutationQueue = task.catch(() => {});
+  return task;
+}
+
 async function slashWord(word) {
-  const key = 'familiarWords';
-  const data = await chrome.storage.local.get(key);
-  let list = data[key] || [];
-  if (!list.includes(word)) {
-    list.push(word);
-    await chrome.storage.local.set({ [key]: list });
-  }
-  return list;
+  return updateFamiliarWords((list) => {
+    if (!list.includes(word)) list.push(word);
+    return list;
+  });
 }
 
 async function unslashWord(word) {
-  const key = 'familiarWords';
-  const data = await chrome.storage.local.get(key);
-  let list = (data[key] || []).filter((w) => w !== word);
-  await chrome.storage.local.set({ [key]: list });
-  return list;
+  return updateFamiliarWords((list) => list.filter((item) => item !== word));
+}
+
+async function clearFamiliarWords() {
+  return updateFamiliarWords(() => []);
+}
+
+let QUIZ_BANK = null;
+let QUIZ_EXTRAS = null;
+let quizDataLoad = null;
+
+async function loadQuizData() {
+  if (QUIZ_BANK && QUIZ_EXTRAS) return { bank: QUIZ_BANK, extras: QUIZ_EXTRAS };
+  if (!quizDataLoad) {
+    quizDataLoad = Promise.all(['quiz_bank.json', 'quiz_extras.json'].map(async (file) => {
+      const response = await fetch(chrome.runtime.getURL(file));
+      if (!response.ok) throw new Error(file + ' 加载失败');
+      return response.json();
+    })).then(([bank, extras]) => {
+      if (!bank || Array.isArray(bank) || typeof bank !== 'object' ||
+          !extras || Array.isArray(extras) || typeof extras !== 'object') {
+        throw new Error('题库文件格式错误');
+      }
+      QUIZ_BANK = bank;
+      QUIZ_EXTRAS = extras;
+      return { bank, extras };
+    }).catch((error) => {
+      quizDataLoad = null;
+      throw error;
+    });
+  }
+  return quizDataLoad;
+}
+
+function deterministicShuffle(values, seedText) {
+  const shuffled = values.slice();
+  let seed = 2166136261;
+  for (const character of String(seedText)) seed = Math.imul(seed ^ character.charCodeAt(0), 16777619);
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function normalizeQuizMeaning(value) {
+  return String(value || '').replace(/[\s，,。；;：:、\/（）()\[\]【】]/g, '').toLowerCase();
+}
+
+function quizPartOfSpeech(meaning) {
+  const match = String(meaning || '').match(/^(vt|vi|adj|adv|prep|conj|pron|num|det|aux|abbr|int|ad|n|v|a)(?:&(?:vt|vi|adj|adv|prep|conj|pron|num|det|aux|abbr|int|ad|n|v|a))?\./i);
+  return match ? match[0].toLowerCase() : '';
+}
+
+function meaningForQuizWord(word, index) {
+  const item = index[word];
+  return item ? trimMeaning(item.meaning, 2) || item.meaning || '' : '';
+}
+
+function buildQuizQuestion(surface, category, index, bank, extras) {
+  const match = matchVocabulary(surface, index);
+  if (!match || !match.categories.includes(category)) return null;
+  const lemma = match.lemma;
+  const extra = extras[lemma];
+  let correct;
+  let distractors;
+  let source;
+  let distractorWords = [];
+  if (extra && typeof extra.correct === 'string' && Array.isArray(extra.distractors)) {
+    correct = extra.correct;
+    distractors = extra.distractors;
+    source = extra.meaningSource || 'generated';
+    distractorWords = extra.distractorWords || [];
+  } else {
+    const sourceDistractorWords = bank[lemma];
+    if (!Array.isArray(sourceDistractorWords) || sourceDistractorWords.length !== 3) return null;
+    correct = meaningForQuizWord(lemma, index);
+    const selectedWords = [];
+    distractors = [];
+    const usedMeanings = new Set([normalizeQuizMeaning(correct)]);
+    const addDistractor = (word) => {
+      const meaning = meaningForQuizWord(word, index);
+      const key = normalizeQuizMeaning(meaning);
+      if (!meaning || !key || usedMeanings.has(key)) return false;
+      selectedWords.push(word);
+      distractors.push(meaning);
+      usedMeanings.add(key);
+      return true;
+    };
+    sourceDistractorWords.forEach(addDistractor);
+    if (distractors.length < 3) {
+      const correctPos = quizPartOfSpeech(correct);
+      const candidates = deterministicShuffle(Object.keys(index).filter((word) =>
+        word !== lemma && index[word].categories.includes('cet4') && !sourceDistractorWords.includes(word)),
+      'cet4-fallback:' + lemma);
+      for (const candidate of candidates) {
+        if (correctPos && quizPartOfSpeech(meaningForQuizWord(candidate, index)) !== correctPos) continue;
+        addDistractor(candidate);
+        if (distractors.length === 3) break;
+      }
+      if (distractors.length < 3) {
+        for (const candidate of candidates) {
+          addDistractor(candidate);
+          if (distractors.length === 3) break;
+        }
+      }
+    }
+    if (distractors.length !== 3) return null;
+    source = selectedWords.some((word) => !sourceDistractorWords.includes(word))
+      ? 'upstream-cet4-quiz-bank+runtime-dedup'
+      : 'upstream-cet4-quiz-bank';
+    distractorWords = selectedWords;
+  }
+  const unique = new Set([correct, ...distractors].map(normalizeQuizMeaning));
+  if (!correct || distractors.length !== 3 || unique.size !== 4 || Array.from(unique).some((value) => !value)) return null;
+  const options = deterministicShuffle([correct, ...distractors], category + ':' + lemma);
+  return {
+    lemma,
+    correct,
+    options,
+    correctIndex: options.indexOf(correct),
+    meaningSource: source,
+    distractorWords,
+  };
 }
 
 // ============ 7. 消息路由 ============
@@ -1146,9 +1313,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       case 'GET_VOCABULARY': {
         await loadVocabularies();
-        const data = await chrome.storage.local.get('selectedVocabulary');
+        const data = await chrome.storage.local.get(['selectedVocabulary', 'learningMode']);
         const selectedVocabulary = VOCABULARIES.includes(data.selectedVocabulary) ? data.selectedVocabulary : 'cet4';
-        sendResponse({ ok: true, selectedVocabulary });
+        const learningMode = LEARNING_MODES.includes(data.learningMode) ? data.learningMode : 'normal';
+        sendResponse({ ok: true, selectedVocabulary, learningMode });
         break;
       }
 
@@ -1156,6 +1324,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!VOCABULARIES.includes(msg.selectedVocabulary)) throw new Error('不支持的词库');
         await chrome.storage.local.set({ selectedVocabulary: msg.selectedVocabulary });
         sendResponse({ ok: true, selectedVocabulary: msg.selectedVocabulary });
+        break;
+      }
+
+      case 'SET_LEARNING_MODE': {
+        if (!LEARNING_MODES.includes(msg.learningMode)) throw new Error('不支持的学习模式');
+        await chrome.storage.local.set({ learningMode: msg.learningMode });
+        sendResponse({ ok: true, learningMode: msg.learningMode });
+        break;
+      }
+
+      case 'GET_QUIZ_BATCH': {
+        const category = VOCABULARIES.includes(msg.vocabulary) ? msg.vocabulary : 'cet4';
+        const index = await loadVocabularies();
+        const { bank, extras } = await loadQuizData();
+        const words = Array.isArray(msg.words) ? msg.words.slice(0, 500) : [];
+        const quizzes = {};
+        for (const rawWord of words) {
+          const word = String(rawWord || '').toLowerCase();
+          const match = matchVocabulary(word, index);
+          if (!match) continue;
+          const question = buildQuizQuestion(word, category, index, bank, extras);
+          if (question) quizzes[word] = question;
+        }
+        sendResponse({ ok: true, vocabulary: category, quizzes });
         break;
       }
 
@@ -1244,7 +1436,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       case 'CLEAR_FAMILIAR': {
-        await chrome.storage.local.remove('familiarWords');
+        await clearFamiliarWords();
         sendResponse({ ok: true, familiar: [], familiarEntries: [] });
         break;
       }
