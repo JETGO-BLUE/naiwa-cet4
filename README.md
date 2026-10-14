@@ -69,10 +69,10 @@
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
-│   ├── privacy.html       # 隐私政策（商店要求公开可访问）
-│   ├── 使用说明.md
-│   ├── screenshots/       # 商店截图
-│   └── store-assets/      # 商店宣传图与文案
+│   ├── privacy.html       # 隐私政策（公开可访问）
+│   ├── 使用说明.md / 使用说明.html
+│   ├── logo-300.png       # 页面页头图标
+│   └── screenshots/       # 界面截图
 ├── .github/workflows/
 │   └── release.yml        # 打 tag 自动打包 zip
 ├── LICENSE

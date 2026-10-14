@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag（如 v1.2.0）时自动打包商店可用的 zip，并创建 GitHub Release
+# 打 tag（如 v1.2.0）时自动打包 zip，并创建 GitHub Release
 on:
   push:
     tags:
@@ -93,4 +93,4 @@ jobs:
             > 本扩展抓的词，就是从这套双语字幕里取的（只取英文原文那一行）。
             > 不开的话，除 YouTube 自带字幕外，Netflix / B站 这类平台基本抓不到词。
 
-            也可以直接在商店安装（审核通过后）：Chrome 应用商店 / Edge 加载项。
+            > 本扩展**不上架任何商店**，只能按上面的方式手动加载。
