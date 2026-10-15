@@ -176,12 +176,11 @@ function extractCET4Words(text, cet4Map) {
   return Array.from(found);
 }
 
-// 时间格式化
-function fmtTime(sec) {
-  sec = Math.floor(sec);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m + ':' + String(s).padStart(2, '0');
+// 秒数保留 1 位小数（时间点要用来跳转，所以存数值不存字符串；
+// 显示成 "3:47" 这种格式交给 popup 做）
+function round1(sec) {
+  const n = Number(sec);
+  return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0;
 }
 
 // ============ 4. 字幕处理 ============
@@ -192,33 +191,38 @@ async function processCaptions(msg) {
   const cet4Map = await loadCET4();
   const { videoId, title, cues } = msg;
 
-  const wordMap = new Map(); // surface -> { meaning, lemma, buckets }
+  const wordMap = new Map(); // surface -> { meaning, lemma, buckets: Map<区号, 精确秒> }
 
   for (const cue of cues) {
     const words = extractCET4Words(cue.text, cet4Map);
     const bucket = Math.floor(cue.start / TIME_BUCKET_SEC); // 落在第几个 3 分钟区
+    const at = round1(cue.start);                           // 这一句的精确起始秒
     for (const surface of words) {
       const m = matchCET4(surface, cet4Map);
       if (!wordMap.has(surface)) {
         wordMap.set(surface, {
           meaning: m ? m.meaning : '',
           lemma: m ? m.lemma : surface,
-          buckets: new Set(),
+          buckets: new Map(),
         });
       }
-      wordMap.get(surface).buckets.add(bucket); // 同一个 3 分钟区只算一次
+      const bm = wordMap.get(surface).buckets;
+      const prev = bm.get(bucket);
+      // 一个 3 分钟区只记一次 —— 取该区里**最早出现那一句的精确时间**，不是区首
+      if (prev === undefined || at < prev) bm.set(bucket, at);
     }
   }
 
   const result = [];
   for (const [word, data] of wordMap) {
-    const buckets = Array.from(data.buckets).sort((a, b) => a - b);
+    const bucketIds = Array.from(data.buckets.keys()).sort((a, b) => a - b);
     result.push({
       word: word,          // 字幕原样
       lemma: data.lemma,   // 还原词根
       meaning: data.meaning,
-      // 每个 3 分钟区取区首时间（0:00 / 3:00 / 6:00…），最多 10 个
-      times: buckets.slice(0, MAX_TIMES).map((b) => fmtTime(b * TIME_BUCKET_SEC)),
+      // 每 3 分钟区一个时间点，记的是区内**精确出现时间**（如 3:47），最多 10 个
+      // 存数值秒（number），popup 负责格式化成 "3:47" 并支持点击跳转
+      times: bucketIds.slice(0, MAX_TIMES).map((b) => data.buckets.get(b)),
     });
   }
 
@@ -529,7 +533,7 @@ function findCognates(lemma, cet4Map) {
   return arr.slice(0, 12);
 }
 
-// ============ 6. 出题（百词斩式单选题，题库全本地、不联网） ============
+// ============ 6. 出题（四选一，题库全本地、不联网） ============
 let QUIZ = null;
 async function loadQuiz() {
   if (QUIZ) return QUIZ;

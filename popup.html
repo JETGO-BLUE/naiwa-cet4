@@ -114,6 +114,14 @@
       flex: 1;
       overflow-y: auto;
       padding: 12px 16px;
+      min-height: 0;
+    }
+    /* 卡片模式下，内容区不再自己滚动，交给牌堆自己管 */
+    #currentContent.deck-mode {
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .stats {
       display: flex;
@@ -130,63 +138,6 @@
       color: var(--sub);
     }
     .stat b { color: var(--text); font-size: 15px; margin-right: 2px; }
-    .word-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      transition: opacity 0.15s;
-    }
-    .word-card.slashed { opacity: 0.4; }
-    .word-card.slashed .word-text { text-decoration: line-through; }
-    .word-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .word-left { flex: 1; min-width: 0; }
-    .word-text {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text);
-    }
-    .word-meaning {
-      font-size: 12px;
-      color: var(--sub);
-      margin-top: 2px;
-    }
-    .times {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-    .time-tag {
-      background: var(--tag);
-      color: var(--tag-text);
-      font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-family: monospace;
-    }
-    .slash-btn {
-      flex-shrink: 0;
-      font-size: 12px;
-      padding: 4px 10px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: #fff;
-      color: var(--sub);
-      cursor: pointer;
-    }
-    .slash-btn:hover { border-color: var(--green); color: var(--green); }
-    .slash-btn.slashed {
-      background: var(--green-soft);
-      color: var(--green);
-      border-color: var(--green);
-    }
     .empty {
       text-align: center;
       color: var(--sub);
@@ -235,10 +186,55 @@
     }
     .video-item .v-meta { font-size: 12px; color: var(--sub); margin-top: 3px; }
     .muted { color: var(--sub); font-size: 12px; }
-    /* 单词可点击提示 */
-    .word-text { cursor: pointer; }
-    .word-text:hover { color: var(--accent); }
-    .word-hint { font-size: 10px; color: #9ca3af; font-weight: 400; margin-left: 2px; }
+
+    /* 时间点标签（可点：回看视频那一处） */
+    .time-tag {
+      background: var(--tag);
+      color: var(--tag-text);
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: monospace;
+      cursor: pointer;
+      user-select: none;
+      transition: background .12s, color .12s, transform .12s;
+    }
+    .time-tag::before {
+      content: "▶";
+      font-size: 7px;
+      margin-right: 3px;
+      vertical-align: 1px;
+      opacity: .5;
+    }
+    .time-tag:hover {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+    .time-tag:hover::before { opacity: 1; }
+    .time-tag:active { transform: scale(.94); }
+    /* 点击后 700ms 的即时反馈 */
+    .time-tag.seeked { background: var(--green); color: #fff; }
+    .time-tag.seek-fail { background: #edcccc; color: #a87272; }
+
+    .slash-btn {
+      flex-shrink: 0;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--sub);
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .slash-btn:hover { border-color: var(--green); color: var(--green); }
+    .slash-btn.slashed {
+      background: var(--green-soft);
+      color: var(--green);
+      border-color: var(--green);
+    }
+
     /* 详情面板（点击单词弹出） */
     .detail-panel {
       display: none;
@@ -342,7 +338,7 @@
     }
     .detail-loading { text-align: center; color: var(--sub); padding: 20px; }
     .detail-error { text-align: center; color: var(--accent); padding: 16px; font-size: 13px; }
-    /* 单词变形（百词斩式：标签 + 词形本体） */
+    /* 单词变形（标签 + 词形本体） */
     .infl-list { display: flex; flex-direction: column; gap: 6px; }
     .infl-row { display: flex; align-items: baseline; gap: 10px; }
     .infl-label {
@@ -358,47 +354,33 @@
       font-family: "Segoe UI", "PingFang SC", sans-serif;
     }
 
-    /* ===== 百词斩式选择题 ===== */
-    .word-head { align-items: flex-start; }
-    .word-actions { display: flex; gap: 6px; flex-shrink: 0; }
-    .mini-btn {
-      font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #fff;
-      color: var(--sub);
-      cursor: pointer;
-      font-family: inherit;
-      white-space: nowrap;
-    }
-    .mini-btn:hover { border-color: var(--tag-text); color: var(--tag-text); }
-    .spk { font-size: 12px; opacity: 0.5; margin-left: 4px; }
-    .quiz-host { margin-top: 8px; }
+    /* ===== 四选一题目本体（卡片和演示页共用） ===== */
+    .quiz-host { margin-top: 9px; }
     .quiz { display: flex; flex-direction: column; gap: 6px; }
     .opt {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       width: 100%;
       text-align: left;
       font-family: inherit;
-      font-size: 12.5px;
-      line-height: 1.45;
-      padding: 8px 10px;
+      font-size: 12.8px;
+      line-height: 1.42;
+      padding: 9px 11px;
       border: 1px solid var(--border);
-      border-radius: 7px;
+      border-radius: 8px;
       background: #fff;
       color: var(--text);
       cursor: pointer;
+      transition: border-color .12s, background .12s;
     }
     .opt:hover:not(:disabled) { border-color: var(--accent); background: #fffafa; }
     .opt:disabled { cursor: default; }
     .opt .idx {
       flex-shrink: 0;
-      width: 16px;
-      height: 16px;
-      line-height: 16px;
+      width: 17px;
+      height: 17px;
+      line-height: 17px;
       text-align: center;
       border-radius: 4px;
       background: var(--tag);
@@ -414,22 +396,207 @@
     .opt.correct { border-color: var(--green); background: var(--green-soft); }
     .opt.correct .idx { background: #cfe8d5; color: var(--green); }
     .answer-reveal {
-      margin-top: 8px;
+      flex: 1;
+      min-width: 0;
       display: flex;
       align-items: center;
-      gap: 6px;
+      flex-wrap: wrap;
+      gap: 4px 6px;
       background: var(--green-soft);
       border: 1px solid #cfe8d5;
       border-radius: 7px;
-      padding: 8px 10px;
-      font-size: 12.5px;
+      padding: 7px 10px;
+      font-size: 12px;
+      line-height: 1.4;
       color: #1b5e20;
       cursor: pointer;
+      text-align: left;
     }
     .answer-reveal:hover { border-color: var(--green); }
     .answer-reveal .more { margin-left: auto; font-size: 11px; opacity: 0.75; white-space: nowrap; }
     .quiz-loading { font-size: 12px; color: var(--sub); padding: 6px 0; }
-    .quiz-tip { font-size: 11px; color: var(--sub); margin-top: 4px; }
+    .quiz-tip { font-size: 11px; color: var(--sub); margin-top: 6px; }
+    /* 答对那一行：释义条 + 「下一题」（挤在一行，省出卡片高度） */
+    .quiz-done {
+      display: flex;
+      align-items: stretch;
+      gap: 7px;
+      margin-top: 8px;
+    }
+    .quiz-done .quiz-next {
+      flex-shrink: 0;
+      padding: 0 12px;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--tag-text);
+      cursor: pointer;
+      transition: border-color .12s, background .12s;
+    }
+    .quiz-done .quiz-next:hover { border-color: var(--tag-text); background: var(--tag); }
+    .quiz-done .quiz-next:active { transform: scale(.97); }
+    .mini-btn {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--sub);
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .mini-btn:hover { border-color: var(--tag-text); color: var(--tag-text); }
+    .spk { font-size: 12px; opacity: 0.5; margin-left: 5px; }
+
+    /* ===== 卡片牌堆（一次只显示一个单词题） ===== */
+    .deck {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px 0;
+    }
+    .deck-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--sub);
+      margin-bottom: 6px;
+    }
+    .deck-count b { color: var(--text); font-size: 15px; }
+    .deck-stat b { color: var(--text); }
+    .deck-bar {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 10px;
+      flex-shrink: 0;
+    }
+    .deck-bar > i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width .25s ease;
+    }
+    .deck-stage {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+    .deck-track {
+      display: flex;
+      height: 100%;
+      transition: transform .28s cubic-bezier(.4, 0, .2, 1);
+      will-change: transform;
+    }
+    .deck-card {
+      flex: 0 0 100%;
+      width: 100%;
+      min-width: 0;
+      overflow-y: auto;
+      padding: 0 2px 2px;
+    }
+    .dc-inner {
+      min-height: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, .06);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+    }
+    .deck-card.solved .dc-inner { border-color: #cfe8d5; }
+    .dc-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .dc-word {
+      font-size: 23px;
+      font-weight: 800;
+      line-height: 1.25;
+      color: var(--text);
+      cursor: pointer;
+      word-break: break-word;
+    }
+    .dc-word:hover { color: var(--accent); }
+    .dc-lemma {
+      font-size: 11px;
+      font-weight: 400;
+      color: #9ca3af;
+      margin-left: 5px;
+    }
+    .dc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .dc-times {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+    }
+    .dc-times-label {
+      font-size: 11px;
+      color: var(--sub);
+      margin-right: 3px;
+    }
+    .deck-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px 12px;
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+    .deck-btn {
+      flex: 1;
+      padding: 9px 0;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s, opacity .12s;
+    }
+    .deck-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .deck-btn:active:not(:disabled) { transform: scale(.97); }
+    .deck-btn:disabled { opacity: .38; cursor: default; }
+    .deck-pos {
+      flex-shrink: 0;
+      min-width: 52px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--sub);
+      font-family: monospace;
+    }
+    .deck-pos b { color: var(--text); font-size: 14px; }
+    .deck-done {
+      margin: 0 16px 10px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--green);
+      background: var(--green-soft);
+      border: 1px solid #cfe8d5;
+      border-radius: 8px;
+      padding: 7px 10px;
+    }
   </style>
 </head>
 <body>

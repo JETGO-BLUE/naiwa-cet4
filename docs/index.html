@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>奶娃过四级 · 看视频顺便攒四级词汇</title>
-<meta name="description" content="奶娃过四级：Chrome / Edge 浏览器扩展。自动抓取视频字幕中的四级词汇，每 3 分钟标注时间点、四选一记词可点读发音、查看单词变形、一键斩掉熟悉词。">
+<meta name="description" content="奶娃过四级：Chrome / Edge 浏览器扩展。自动抓取视频字幕中的四级词汇，卡片式四选一记词（选对自动跳下一题）、标注可点击回看的精确时间点、查看单词变形、一键斩掉熟悉词。">
 <style>
   :root{
     --bg:#fbfaf8;
@@ -148,7 +148,7 @@
     <span class="badge">Chrome / Edge 扩展 · 免费开源</span><br>
     <img class="logo" src="logo-300.png" alt="奶娃过四级">
     <h1>奶娃过四级</h1>
-    <p class="tag">看视频的时候，把四级词汇悄悄攒起来 —— 自动抓取字幕里的 CET-4 单词，每 3 分钟标时间点、四选一记词、查变形、一键斩掉熟悉词。</p>
+    <p class="tag">看视频的时候，把四级词汇悄悄攒起来 —— 自动抓取字幕里的 CET-4 单词，卡片式四选一记词、标注能点回去的精确时间点、查变形、一键斩掉熟悉词。</p>
     <div class="btns">
       <a class="btn btn-primary" href="#install">📦 安装使用</a>
       <a class="btn btn-ghost" href="privacy.html">🔒 隐私政策</a>
@@ -166,19 +166,24 @@
       <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕，没开也能抓 YouTube 原生字幕。</p>
     </div>
     <div class="card">
+      <div class="ico">🎴</div>
+      <h3>卡片式，一次只做一题</h3>
+      <p>单词题做成卡片牌堆，一屏只有一道题。底部常驻「上一题 / 下一题」按钮左右翻页，键盘 ← → 和鼠标划动也能翻。</p>
+    </div>
+    <div class="card">
       <div class="ico">⏱️</div>
-      <h3>每 3 分钟记一次时间点</h3>
-      <p>同一个词在 3 分钟区间内出现多少次都只记一次（0:00 / 3:00 / 6:00…），最多 10 个 —— 能定位原句，又不会把列表刷满。</p>
+      <h3>精确时间点，点一下跳回去</h3>
+      <p>同一个词每 3 分钟区间只记一次，记的是<strong>那一句真正出现的秒数</strong>（如 3:47），最多 10 个。点一下视频就跳回去，落点再提前 0.7 秒 —— 免得跳过去字幕已经没了。</p>
     </div>
     <div class="card">
       <div class="ico">🎧</div>
       <h3>四选一记词</h3>
-      <p>不直接给中文释义：单击单词听发音，再从 4 个中文释义里选。选错标 ❌，选对才亮出答案。4590 词的题库全在本机，出题不联网。</p>
+      <p>不直接给中文释义：单击单词听发音，再从 4 个中文释义里选。<strong>选对自动翻到下一题，选错就停在原题</strong>标 ❌ 让你接着选。4590 词的题库全在本机，出题不联网。</p>
     </div>
     <div class="card">
       <div class="ico">🗡️</div>
       <h3>一键「斩」</h3>
-      <p>认识？点一下「斩」，这个词立刻从列表里消失。越用越清爽，专注那些你还不熟的词。</p>
+      <p>认识？点一下「斩」，这个词立刻从题堆里消失。越用越清爽，专注那些你还不熟的词。</p>
     </div>
     <div class="card">
       <div class="ico">📖</div>
@@ -200,19 +205,31 @@
 
 <section class="wrap" id="shots">
   <h2>界面预览</h2>
-  <p class="lead">四选一记词、点开详解、斩词管理 —— 三张图看懂。</p>
+  <p class="lead">卡片式答题、答对翻页、时间点回看、详解、斩词 —— 六张图看懂。</p>
   <div class="shots">
     <figure class="shot">
-      <img src="screenshots/01-word-list.png" alt="四选一记词界面">
-      <figcaption>四选一记词 · 选错标 ❌，选对亮出释义</figcaption>
+      <img src="screenshots/01-deck-unanswered.png" alt="卡片式四选一答题界面">
+      <figcaption>卡片式四选一 · 一次只做一题</figcaption>
     </figure>
     <figure class="shot">
-      <img src="screenshots/02-word-detail.png" alt="单词详解面板">
+      <img src="screenshots/02-deck-answered.png" alt="答对与答错状态">
+      <figcaption>选对亮释义、选错标 ❌ 停在本题</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/03-deck-swipe.png" alt="左右翻页">
+      <figcaption>左右翻页 · 底部常驻按钮</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/04-word-detail.png" alt="单词详解面板">
       <figcaption>点「详解」· 变形、各词性释义、同根词</figcaption>
     </figure>
     <figure class="shot">
-      <img src="screenshots/03-familiar-words.png" alt="已斩词管理">
+      <img src="screenshots/05-familiar-words.png" alt="已斩词管理">
       <figcaption>已斩词 · 斩过的不再打扰，随时可撤销</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="screenshots/06-popup.png" alt="弹窗本体">
+      <figcaption>弹窗本体 · 420 × 580</figcaption>
     </figure>
   </div>
 </section>

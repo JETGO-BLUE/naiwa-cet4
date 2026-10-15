@@ -341,5 +341,22 @@
       sendResponse({ ok: true, state: getCurrentState() });
       return true;
     }
+    // 点击弹窗里的时间点 → 把视频跳到那个位置
+    // 只改播放位置，不动播放/暂停状态（原本在播就继续播，原本暂停就停在那一帧）
+    if (msg.type === 'SEEK_TO') {
+      const v = getVideo();
+      const t = Number(msg.time);
+      if (v && Number.isFinite(t) && t >= 0) {
+        try {
+          v.currentTime = t;
+          sendResponse({ ok: true, currentTime: v.currentTime });
+        } catch (err) {
+          sendResponse({ ok: false, error: String(err) });
+        }
+      } else {
+        sendResponse({ ok: false, error: 'no-video' });
+      }
+      return true;
+    }
   });
 })();
