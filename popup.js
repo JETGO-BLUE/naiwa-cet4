@@ -628,16 +628,21 @@ async function renderHistory() {
     container.innerHTML = '<div class="empty"><div class="icon">📦</div>暂无历史记录</div>';
     return;
   }
+  const keepScroll = container.scrollTop;
   let html = '';
   for (const v of videos) {
     const date = new Date(v.capturedAt).toLocaleString('zh-CN', { hour12: false });
     html += `
-      <div class="video-item" data-video="${v.videoId}">
-        <div class="v-title">${escapeHtml(v.title || v.videoId)}</div>
+      <div class="video-item" data-video="${escapeHtml(v.videoId)}">
+        <div class="v-row">
+          <div class="v-title">${escapeHtml(v.title || v.videoId)}</div>
+          <button type="button" class="video-del" data-video="${escapeHtml(v.videoId)}" title="删除这条历史记录">✕</button>
+        </div>
         <div class="v-meta">${v.totalWords} 个四级词 · ${date}</div>
       </div>`;
   }
   container.innerHTML = html;
+  container.scrollTop = keepScroll; // 重绘别把用户滚到顶部
 
   container.querySelectorAll('.video-item').forEach((el) => {
     el.addEventListener('click', async () => {
@@ -649,6 +654,33 @@ async function renderHistory() {
         switchTab('current');
         render({ reset: true });
       }
+    });
+  });
+
+  container.querySelectorAll('.video-del').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation(); // 别把"打开这条"也触发了
+      const videoId = btn.getAttribute('data-video');
+      const item = videos.find((v) => v.videoId === videoId);
+      const name = (item && item.title) || videoId;
+      if (!confirm('删除「' + name + '」的历史记录？\n\n只删这条视频收集到的词，已斩词和其他视频不受影响。')) return;
+
+      btn.disabled = true;
+      const r = await send({ type: 'DELETE_VIDEO', videoId: videoId });
+      if (!r || !r.ok) {
+        alert('删除失败：' + ((r && r.error) || '未知错误'));
+        btn.disabled = false;
+        return;
+      }
+      // 删的正好是当前正在看的那条 → 回到空态，别留一份已经不存在的数据在界面上
+      if (currentRecord && currentRecord.videoId === videoId) {
+        currentRecord = null;
+        lastStatus = null;
+        searchKeyword = '';
+        document.getElementById('searchInput').value = '';
+        render({ reset: true });
+      }
+      renderHistory();
     });
   });
 }

@@ -782,6 +782,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
+      // 删除一条历史记录：只删「这条视频收集到的词」，不动已斩词
+      case 'DELETE_VIDEO': {
+        const videoId = String(msg.videoId || '');
+        if (!/^[\w-]{1,64}$/.test(videoId)) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        await chrome.storage.local.remove('video_' + videoId);
+        // 如果它正好是"上次打开的"，一并清掉指针，否则 popup 会一直去捞一个不存在的记录
+        const d = await chrome.storage.local.get('lastVideoId');
+        if (d.lastVideoId === videoId) await chrome.storage.local.remove('lastVideoId');
+        sendResponse({ ok: true, videoId: videoId });
+        break;
+      }
+
       case 'GET_LAST_VIDEO': {
         const data = await chrome.storage.local.get(['lastVideoId', 'familiarWords']);
         const lastId = data.lastVideoId;
