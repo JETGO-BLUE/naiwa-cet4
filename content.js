@@ -176,45 +176,55 @@
   }
 
   // ============ 备用通道：YouTube 原生字幕 ============
-  function getPlayerResponse() {
-    if (window.ytInitialPlayerResponse) return window.ytInitialPlayerResponse;
-    if (window.ytplayer && window.ytplayer.config && window.ytplayer.config.args) {
+  // ⚠️ 这里踩过一个真实的坑：content script 跑在「隔离世界」，window 是扩展自己的全局对象，
+  // **读不到页面 JS 定义的 window.ytInitialPlayerResponse**。
+  // 以前直接读它，结果恒为 undefined —— 这条兜底通道从来没成功过一次，
+  // 但 README 一直写着"未开启时自动回退到 YouTube 原生字幕"。
+  //
+  // 现在改成两步：
+  //   1) 问 youtube-bridge.js（manifest 里注册的 MAIN world 脚本）要轨道元数据
+  //   2) 把轨道地址交给 background 下载（service worker 有 host 权限，不受页面 CORS 约束）
+  const BRIDGE_CHANNEL = 'naiwa-yt-bridge-v1';
+  let bridgeSeq = 0;
+
+  function requestYoutubeTracks(timeoutMs) {
+    return new Promise((resolve) => {
+      if (!/(^|\.)youtube\.com$/i.test(location.hostname)) return resolve([]);
+      let settled = false;
+      const requestId = 'r' + Date.now().toString(36) + '-' + ++bridgeSeq;
+      const finish = (tracks) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        resolve(tracks || []);
+      };
+      const onMessage = (event) => {
+        if (event.source !== window || event.origin !== location.origin) return;
+        const d = event.data;
+        if (!d || d.channel !== BRIDGE_CHANNEL || d.type !== 'TRACKS' || d.requestId !== requestId) return;
+        finish(Array.isArray(d.tracks) ? d.tracks : []);
+      };
+      const timer = setTimeout(() => finish([]), timeoutMs || 2500);
+      window.addEventListener('message', onMessage);
       try {
-        return JSON.parse(window.ytplayer.config.args.player_response);
+        window.postMessage({ channel: BRIDGE_CHANNEL, type: 'GET_TRACKS', requestId: requestId }, location.origin);
       } catch (e) {
-        return null;
+        finish([]);
       }
-    }
-    return null;
+    });
   }
 
-  function getCaptionTracks(pr) {
-    try {
-      return pr.captions.playerCaptionsTracklistRenderer.captionTracks || [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async function fetchCaptions(track) {
-    let url = track.baseUrl;
-    url += (url.indexOf('?') === -1 ? '?' : '&') + 'fmt=json3';
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('字幕请求失败 ' + resp.status);
-    const data = await resp.json();
-    return parseJson3(data);
-  }
-
-  function parseJson3(data) {
-    const cues = [];
-    const events = data.events || [];
-    for (const ev of events) {
-      if (ev.segs && ev.tStartMs != null) {
-        const text = ev.segs.map((s) => s.utf8 || '').join(' ').trim();
-        if (text) cues.push({ start: ev.tStartMs / 1000, text: text });
-      }
-    }
-    return cues;
+  function fetchYoutubeCues(track, videoId) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'FETCH_YOUTUBE_CAPTIONS', trackUrl: track.baseUrl, expectedVideoId: videoId },
+        (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.ok) return resolve(null);
+          resolve(resp.cues || null);
+        }
+      );
+    });
   }
 
   function pickTrack(tracks) {
@@ -223,39 +233,36 @@
       tracks.find((t) => t.languageCode === 'en' && !t.kind) ||
       tracks.find((t) => t.languageCode === 'en') ||
       tracks.find((t) => (t.languageCode || '').startsWith('en')) ||
-      tracks[0]
+      tracks.find((t) => (t.label || '').toLowerCase().indexOf('english') >= 0) ||
+      // 不再退到 tracks[0]：拿到一轨西班牙语字幕对四级词表没有意义，白下载一次
+      null
     );
   }
 
-  // 备用通道：沉浸式翻译没抓到任何东西时，尝试原生字幕
+  // 备用通道：沉浸式翻译没抓到任何东西时，尝试原生字幕。
+  // 页面变量可能比 document_start 晚一拍才有，所以最多试两轮。
   async function fallbackNativeCaptions() {
     const videoId = getVideoId();
     if (!videoId || videoId === lastVideoId) return;
     try {
-      let pr = getPlayerResponse();
-      let waited = 0;
-      while (!pr && waited < 8000) {
-        await new Promise((r) => setTimeout(r, 500));
-        waited += 500;
-        pr = getPlayerResponse();
+      let track = null;
+      for (let attempt = 0; attempt < 2 && !track; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+        const tracks = await requestYoutubeTracks(2500);
+        track = pickTrack(tracks);
       }
-      if (!pr) return;
-      const tracks = getCaptionTracks(pr);
-      if (tracks.length === 0) return;
-      const track = pickTrack(tracks);
       if (!track) return;
-      const cues = await fetchCaptions(track);
-      if (cues.length > 0) {
-        lastVideoId = videoId;
-        chrome.runtime.sendMessage({
-          type: 'CAPTIONS',
-          videoId: videoId,
-          title: getVideoTitle(),
-          language: track.languageCode || 'unknown',
-          cues: cues,
-          source: 'youtube-native',
-        });
-      }
+      const cues = await fetchYoutubeCues(track, videoId);
+      if (!cues || cues.length === 0) return;
+      lastVideoId = videoId;
+      chrome.runtime.sendMessage({
+        type: 'CAPTIONS',
+        videoId: videoId,
+        title: getVideoTitle(),
+        language: track.languageCode || 'unknown',
+        cues: cues,
+        source: 'youtube-native',
+      });
     } catch (e) {
       console.warn('[YT-CET4] 原生字幕兜底失败:', e);
     }

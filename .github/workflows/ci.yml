@@ -36,8 +36,19 @@ jobs:
           if (v.length !== 3 || v.some(isNaN)) fail('version 必须是 x.y.z 格式，当前: ' + m.version);
           console.log('✅ manifest.json 合法  name=' + m.name + '  version=' + m.version);
 
+          // ---- YouTube 桥接（MAIN world）配置 ----
+          // content script 在隔离世界读不到页面的 ytInitialPlayerResponse，
+          // 所以原生字幕兜底依赖这个 MAIN world 桥接脚本。配置错了它就静默失效。
+          const bridge = (m.content_scripts || []).find((entry) => (entry.js || []).includes('youtube-bridge.js'));
+          if (!bridge) fail('manifest.json 缺少 youtube-bridge.js 的 content_scripts 入口');
+          if (bridge.world !== 'MAIN') fail('youtube-bridge.js 必须运行在 MAIN world，否则读不到页面变量');
+          if (bridge.run_at !== 'document_start') fail('youtube-bridge.js 应在 document_start 注入，否则可能错过播放器初始化');
+          if ((bridge.matches || []).some((p) => !/youtube\.com/.test(p))) fail('youtube-bridge.js 只应匹配 youtube.com');
+          if (Number(m.minimum_chrome_version) < 111) fail('MAIN world content script 要求 minimum_chrome_version >= 111');
+          console.log('✅ YouTube 桥接配置正确（MAIN / document_start / 仅 youtube.com）');
+
           // ---- 扩展必需文件 ----
-          const required = ['background.js','content.js','popup.html','popup.js','cet4_words.json','quiz_bank.json'];
+          const required = ['background.js','content.js','youtube-bridge.js','popup.html','popup.js','cet4_words.json','quiz_bank.json'];
           for (const f of required) {
             if (!fs.existsSync(f)) fail('缺少必需文件: ' + f);
           }
@@ -81,6 +92,8 @@ jobs:
           console.log('✅ content.js 语法正确');
           new (require('vm').Script)(fs.readFileSync('popup.js','utf8'));
           console.log('✅ popup.js 语法正确');
+          new (require('vm').Script)(fs.readFileSync('youtube-bridge.js','utf8'));
+          console.log('✅ youtube-bridge.js 语法正确');
 
           console.log('');
           console.log('🎉 全部检查通过');

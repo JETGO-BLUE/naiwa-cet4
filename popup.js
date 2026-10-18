@@ -22,6 +22,30 @@ let autoNextTimer = null;
 let swipeStartX = null;
 let swipeMoved = false;
 let swipeEndAt = 0; // 刚划完的时间戳，用来吃掉紧随其后的那次 click
+let basicHiddenCount = 0; // 本次被隐藏的基础词数量（只用于提示）
+
+// ============ 基础词过滤 ============
+// a / the / of / be / go 这类词放题堆里就是噪音。
+// 只在**显示层**隐藏：存储里的原始记录一个字不删，搜索时也照样搜得到。
+const BASIC_WORDS = new Set(
+  (
+    'a an the i you he she it we they me him her us them ' +
+    'my your his its our their mine yours hers ours theirs ' +
+    'this that these those and or but so if as ' +
+    'to of in on at for from with by ' +
+    'be go have do get come take make say see know think ' +
+    'can could may might must shall should will would ' +
+    'not no yes very'
+  ).split(/\s+/)
+);
+
+function isBasicWord(w) {
+  if (!w) return false;
+  return (
+    BASIC_WORDS.has(String(w.word || '').toLowerCase()) ||
+    BASIC_WORDS.has(String(w.lemma || '').toLowerCase())
+  );
+}
 
 // ============ 发音：浏览器内置语音合成（本地，不联网、不加权限） ============
 function pickEnglishVoice() {
@@ -247,22 +271,31 @@ async function renderCurrent(opts) {
 
   const all = currentRecord.words || [];
   const slashedSet = new Set(familiarWords);
-  const slashedCount = all.filter((w) => slashedSet.has(w.word)).length;
-  // ① 已经斩过的词汇，不再出现在题堆里
-  const active = all.filter((w) => !slashedSet.has(w.word));
+
+  // ① 基础词（a / the / of …）不进题堆，但原始记录保留、搜索仍能查到
+  const learning = all.filter((w) => !isBasicWord(w));
+  basicHiddenCount = all.length - learning.length;
+
+  const slashedCount = learning.filter((w) => slashedSet.has(w.word)).length;
+  // ② 已经斩过的词汇，不再出现在题堆里
+  const active = learning.filter((w) => !slashedSet.has(w.word));
 
   const kw = searchKeyword.trim().toLowerCase();
+  // 搜索时**不受基础词过滤限制** —— 想找 "the" 也能找得到
   const shown = kw
-    ? active.filter(
-        (w) =>
-          w.word.toLowerCase().includes(kw) ||
-          (w.meaning || '').toLowerCase().includes(kw)
-      )
+    ? all
+        .filter((w) => !slashedSet.has(w.word))
+        .filter(
+          (w) =>
+            w.word.toLowerCase().includes(kw) ||
+            (w.meaning || '').toLowerCase().includes(kw)
+        )
     : active;
 
+  // 顶部统计
   const statsHtml = `
     <div class="stats">
-      <div class="stat"><b>${all.length}</b>四级词</div>
+      <div class="stat"><b>${learning.length}</b>四级词</div>
       <div class="stat"><b>${active.length}</b>待记</div>
       <div class="stat"><b>${slashedCount}</b>已斩</div>
     </div>`;
@@ -276,10 +309,19 @@ async function renderCurrent(opts) {
 
   if (active.length === 0) {
     setDeckMode(false);
+    const onlyBasic = learning.length === 0;
+    const note =
+      basicHiddenCount > 0
+        ? '<br/><br/><span class="muted">已自动隐藏 ' + basicHiddenCount + ' 个 a / the / of 这类基础词</span>'
+        : '';
     container.innerHTML =
       statsHtml +
-      '<div class="empty"><div class="icon">🎉</div>这个视频的四级词都被你斩完了<br/><br/>' +
-      '想找回来？切到「已斩词」页，点词后面的 ✕ 即可撤销。</div>';
+      '<div class="empty"><div class="icon">' + (onlyBasic ? '🫧' : '🎉') + '</div>' +
+      (onlyBasic
+        ? '这个视频里只有基础词，没有值得记的四级词'
+        : '这个视频的四级词都被你斩完了<br/><br/>想找回来？切到「已斩词」页，点词后面的 ✕ 即可撤销。') +
+      note +
+      '</div>';
     return;
   }
 
@@ -442,8 +484,17 @@ function updateDeckMeta() {
     wrong += st.wrong.size;
   }
   if (statEl) {
+    // 基础词被隐藏时给个交代，不然"怎么少了 12 个词"会让人以为丢了
+    const basicNote =
+      basicHiddenCount > 0
+        ? ' · <span class="muted" title="已隐藏 ' +
+          basicHiddenCount +
+          ' 个 a / the / of 这类基础词；在搜索框里输入仍能查到">基础 ' +
+          basicHiddenCount +
+          '</span>'
+        : '';
     statEl.innerHTML =
-      '✅ <b>' + right + '</b> · ❌ <b>' + wrong + '</b> · 斩 <b>' + familiarWords.length + '</b>';
+      '✅ <b>' + right + '</b> · ❌ <b>' + wrong + '</b> · 斩 <b>' + familiarWords.length + '</b>' + basicNote;
   }
   if (doneEl) doneEl.hidden = !(deckWords.length > 0 && right === deckWords.length);
 }

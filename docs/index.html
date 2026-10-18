@@ -163,7 +163,12 @@
     <div class="card">
       <div class="ico">🎯</div>
       <h3>自动抓词</h3>
-      <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕，没开也能抓 YouTube 原生字幕。</p>
+      <p>播放视频时自动从字幕提取四级词汇。优先读取「沉浸式翻译」的双语字幕；没开时走另一条通道读 YouTube 自带的英文字幕轨。</p>
+    </div>
+    <div class="card">
+      <div class="ico">🧹</div>
+      <h3>基础词自动藏起来</h3>
+      <p><code>a / the / of / be / go</code> 这类词不进题堆，只在显示层隐藏 —— 原始记录不动，搜索仍能查到。</p>
     </div>
     <div class="card">
       <div class="ico">🎴</div>
@@ -243,6 +248,8 @@
     本扩展抓的词，就是从「沉浸式翻译」渲染出的<strong>双语字幕</strong>里取的（只取英文原文那一行）。
     不开的话，除了 YouTube 自带字幕，<strong>Netflix / B站 这类平台基本抓不到词</strong> —— 想省事就一直开着。
   </div>
+
+  <p class="lead">浏览器要求：<strong>Chrome / Edge 111 及以上</strong>（抓 YouTube 原生字幕用到了 <code>world: "MAIN"</code> 的 content script，这是 111 才有的能力）。</p>
 
   <ol class="steps">
     <li>

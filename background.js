@@ -556,6 +556,27 @@ function cet4Keys(cet4Map) {
   return CET4_KEYS;
 }
 
+// 确定性打乱：同一个词每次生成的选项顺序都一样。
+// 不用 Math.random —— 否则每开一次弹窗答案位置就跳一次，
+// 昨天记的「B 是答案」今天变 C，既影响记忆又让人怀疑自己。
+// 做法：FNV-1a 把词本身哈希成种子，再跑固定种子的 Fisher-Yates。
+function seededShuffle(values, seedText) {
+  const arr = values.slice();
+  let seed = 2166136261;
+  const s = String(seedText || '');
+  for (let i = 0; i < s.length; i++) {
+    seed = Math.imul(seed ^ s.charCodeAt(i), 16777619) >>> 0;
+  }
+  for (let i = arr.length - 1; i > 0; i--) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
 // 给一个词生成单选题：正确的四级释义 1 个 + 形近/易混干扰释义 3 个，打乱顺序
 function buildQuiz(word, cet4Map, bank) {
   const w = String(word || '').toLowerCase();
@@ -597,13 +618,7 @@ function buildQuiz(word, cet4Map, bank) {
   fill((k) => k[0] === base[0] || k.length === base.length);
   fill(null);
 
-  const options = opts.concat([correct]);
-  for (let i = options.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = options[i];
-    options[i] = options[j];
-    options[j] = tmp;
-  }
+  const options = seededShuffle(opts.concat([correct]), base);
   return {
     word: w,
     base: base,
@@ -634,7 +649,44 @@ async function unslashWord(word) {
   return list;
 }
 
-// ============ 7. 消息路由 ============
+// ============ 7. YouTube 原生字幕下载（备用通道的最后一步） ============
+// 轨道地址由 youtube-bridge.js（跑在页面 MAIN world）提供 —— content script 在隔离世界，
+// 读不到页面的 window.ytInitialPlayerResponse，以前那条路是死的。
+// 下载放在这里而不是 content script：baseUrl 不一定与当前页面同源，
+// service worker 有 host_permissions 兜底，不受页面 CORS 限制。
+const YT_URL_RE = /^https:\/\/([\w-]+\.)?youtube(-nocookie)?\.com\//i;
+
+function parseJson3Cues(data) {
+  const out = [];
+  const events = (data && data.events) || [];
+  for (const ev of events) {
+    if (!ev || !ev.segs || ev.tStartMs == null) continue;
+    const text = ev.segs
+      .map((s) => (s && s.utf8) || '')
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) continue;
+    const start = Number(ev.tStartMs) / 1000;
+    if (!Number.isFinite(start) || start < 0) continue;
+    out.push({ start: start, text: text.slice(0, 2000) });
+    if (out.length >= 20000) break; // 防跑飞：超长字幕轨也不无限存
+  }
+  return out;
+}
+
+async function fetchYoutubeCaptionCues(trackUrl, expectedVideoId) {
+  if (!YT_URL_RE.test(trackUrl)) throw new Error('字幕地址不在 YouTube 域名内');
+  if (!/^[\w-]{6,32}$/.test(String(expectedVideoId || ''))) throw new Error('视频 ID 无效');
+  const url = trackUrl + (trackUrl.indexOf('?') === -1 ? '?' : '&') + 'fmt=json3';
+  const resp = await fetch(url, { credentials: 'omit' });
+  if (!resp.ok) throw new Error('字幕请求失败 ' + resp.status);
+  const cues = parseJson3Cues(await resp.json());
+  if (cues.length === 0) throw new Error('字幕轨里没有可读文本');
+  return cues;
+}
+
+// ============ 8. 消息路由 ============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
@@ -643,6 +695,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'CAPTIONS': {
         const rec = await processCaptions(msg);
         sendResponse({ ok: true, record: rec });
+        break;
+      }
+
+      // 备用通道：桥接脚本给出轨道地址后，由这里下载并解析成 cues
+      case 'FETCH_YOUTUBE_CAPTIONS': {
+        try {
+          const cues = await fetchYoutubeCaptionCues(msg.trackUrl, msg.expectedVideoId);
+          sendResponse({ ok: true, cues: cues, count: cues.length });
+        } catch (e) {
+          sendResponse({ ok: false, error: String((e && e.message) || e) });
+        }
         break;
       }
 

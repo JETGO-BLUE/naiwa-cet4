@@ -2,7 +2,7 @@
 
 > 看视频的时候，把四级词汇悄悄攒起来。
 
-[![Version](https://img.shields.io/badge/version-1.4.0-c2572a)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.5.0-c2572a)](manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
 [![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
 
@@ -23,10 +23,11 @@
 
 | 功能 | 说明 |
 |------|------|
-| **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文），未开启时自动回退到 YouTube 原生字幕 |
+| **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文）；没开时通过 MAIN world 桥接抓 YouTube 原生字幕轨 |
 | **卡片式答题** | 单词题做成卡片牌堆，**一屏只有一道题**。底部常驻「上一题 / 下一题」按钮左右翻页；键盘 ← → 和鼠标划动也能翻 |
 | **去重 + 精确时间点** | 同一个词只列一次；按 **3 分钟一个区间**记录，但记的是**那一句真正出现的秒数**（如 `3:47`），不是区间开头的整点，最多 10 个。**点一下视频就跳回去**，落点再提前 0.7 秒，免得跳过去字幕已经消失 |
-| **四选一记词** | 不直接给答案：单击单词朗读发音，从 4 个中文释义里选。**选对自动翻到下一题；选错停在原题**、标 ❌ 让你接着选。**4590 词题库内置，出题不联网** |
+| **四选一记词** | 不直接给答案：单击单词朗读发音，从 4 个中文释义里选。**选对自动翻到下一题；选错停在原题**、标 ❌ 让你接着选。选项顺序**按单词固定**，不会每开一次就乱跳。**4590 词题库内置，出题不联网** |
+| **基础词过滤** | `a / the / of / be / go` 这类词不进题堆，只在显示层隐藏（原始记录不动，搜索仍能查到） |
 | **一键「斩」** | 标记为熟悉词后，该词**立刻从当前题堆移除**，越用越清爽 |
 | **点「详解」看详情** | 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
@@ -36,6 +37,11 @@
 ---
 
 ## 安装（开发者模式加载）
+
+> **浏览器版本要求：Chrome / Edge 111 及以上。**
+> 抓 YouTube 原生字幕依赖 content script 的 `world: "MAIN"`，这是 Chrome 111 才有的能力
+> （`manifest.json` 里已写 `minimum_chrome_version: "111"`，更低的版本会直接装不上）。
+> 只用沉浸式翻译通道的话，老版本也能跑，但建议直接升级。
 
 ### Chrome
 
@@ -64,6 +70,7 @@
 ├── manifest.json          # 扩展配置（MV3）
 ├── background.js          # 核心逻辑：词形还原/生成、词表匹配、词典查询、消息路由
 ├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
+├── youtube-bridge.js      # 只跑在 YouTube 的 MAIN world：把播放器里的字幕轨元数据递出来
 ├── popup.html / popup.js  # 弹窗界面：卡片牌堆答题、详情、斩词、历史
 ├── cet4_words.json        # 四级词表（约 4590 词）
 ├── quiz_bank.json         # 出题题库：每个词的 3 个形近/易混干扰释义（本地生成）
@@ -88,7 +95,10 @@
 视频页面
   ├─ 沉浸式翻译字幕（#immersive-translate-caption-window 的 Shadow DOM）
   │     └─ .source-cue 英文原文
-  └─ YouTube 原生字幕（备用通道）
+  └─ YouTube 原生字幕（备用通道，两级配合）
+        ├─ youtube-bridge.js  ← 跑在页面 MAIN world，读 window.ytInitialPlayerResponse，
+        │                        再用 postMessage 把「字幕轨地址」递给隔离世界的 content.js
+        └─ background         ← 拿地址下载 + 解析 fmt=json3（service worker 不受页面 CORS 约束）
         ↓  MutationObserver 监听变化
 content.js  提取英文字幕文本 → 发给 background
         ↓  chrome.runtime.sendMessage
@@ -106,6 +116,13 @@ popup.js  卡片牌堆：一屏一道题，底部按钮 / ← → / 划动翻页
           点时间点   → 让视频 seek 到「记录秒数 − 0.7s」
           点「详解」 → LOOKUP_LOCAL（秒出本地变形）→ LOOKUP_ONLINE（补释义）
 ```
+
+> **为什么备用通道要拆成两个脚本？**
+> content script 跑在「隔离世界」，`window` 是扩展自己的全局对象，
+> **读不到页面 JS 定义的 `ytInitialPlayerResponse`**。早期版本直接读它，
+> 结果恒为 `undefined`，这条兜底通道一直静默失效 —— 1.5.0 才真正修好。
+> 现在由 MAIN world 的 `youtube-bridge.js` 读页面变量，只把字幕轨地址递出来（不传内容），
+> 下载交给 service worker。
 
 ### 隐私
 

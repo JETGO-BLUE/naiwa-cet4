@@ -146,11 +146,13 @@
 <h2>四、几个要点（务必看）</h2>
 <ol>
 <li><strong>一定要开沉浸式翻译的双语字幕</strong>：本扩展默认监听沉浸式翻译的双语字幕（<code>#immersive-translate-caption-window</code>），只取其中的<strong>英文原文</strong>行。它是<strong>唯一稳定的抓词通道，建议一直开着</strong>。全程只读、不修改它的 DOM，不会影响沉浸式翻译的正常显示，也不会影响你看视频。</li>
-<li><strong>没开沉浸式翻译会怎样</strong>：会自动退回抓 YouTube 原生字幕轨，所以 <strong>YouTube 上勉强能用</strong>；但 <strong>Netflix / B站 等平台没有原生英文字幕可抓，不开就一定抓不到词</strong>。</li>
+<li><strong>没开沉浸式翻译会怎样</strong>：在 <strong>YouTube 上</strong>会自动走另一条通道 —— 读页面自带的英文字幕轨，所以不开也能抓到词（这条通道 1.5.0 才真正修好，之前是失效的）。但 <strong>Netflix / B站 等平台没有可读的原生英文字幕，不开就一定抓不到词</strong>。另外这条路需要 <strong>Chrome / Edge 111 以上</strong>。</li>
 <li><strong>实时累积，不是一次性全量</strong>：沉浸式翻译只渲染"当前这一句"字幕，所以单词是边看边收集的。想收集完整个视频的词，就得把视频看完（或快进）。</li>
 <li><strong>答题状态在关弹窗后不保留</strong>：本次答对 / 答错的标记只在弹窗开着的时候有效，关掉再开就是干净的题堆。只有「已斩词」是永久保存的。</li>
 <li><strong>斩词是全局的</strong>：斩掉一个词，它<strong>立刻从「当前视频」的题堆里消失</strong>，以后所有视频里也不再出现。想恢复去「已斩词」标签页点 ✕。</li>
 <li><strong>时间点是精确秒数，每 3 分钟区间最多一个</strong>：一个词在 0:00~3:00 之间出现多少次都只记<strong>最早那一句的时间</strong>（比如 <code>0:47</code>），下一个 3 分钟区间再记一个，最多 10 个。这样既不会刷屏，又能真正定位到原句。</li>
+<li><strong>基础词会被自动藏起来</strong>：<code>a</code> / <code>the</code> / <code>of</code> / <code>be</code> / <code>go</code> 这类词不进题堆。它们<strong>没有被删除</strong>，原始记录还在，在搜索框里输入 <code>the</code> 仍然能查到；顶部会用「基础 N」告诉你藏了几个。</li>
+<li><strong>题目选项顺序是固定的</strong>：同一个词，每次打开选项位置都一样，不会今天选 B 明天答案跑 C。</li>
 <li><strong>记词题全部离线</strong>：4590 个词的题库（正确释义 + 3 个形近/易混的干扰释义）已经打包在扩展里，<strong>出题和判分都在本机，不联网</strong>；发音走系统语音合成，同样不联网。</li>
 <li><strong>词形还原</strong>：<code>studies</code>/<code>studying</code>/<code>studied</code> 会匹配到词根 <code>study</code>，卡片标题按字幕原样显示，后面用小字标出原型。</li>
 </ol>
@@ -180,6 +182,7 @@
 <hr>
 <h2>七、已知限制</h2>
 <ul>
+<li><strong>要求 Chrome / Edge 111 以上</strong>。抓 YouTube 原生字幕依赖 <code>world: "MAIN"</code> 的 content script，这个能力 111 才有；<code>manifest.json</code> 里写了 <code>minimum_chrome_version</code>，更低版本会直接装不上（可继续用 1.4.0）。</li>
 <li>只支持 <strong>字幕</strong>，不支持纯语音识别（语音转文字需要联网 API + 付费，暂不做）。</li>
 <li>时间点回看依赖 content script 在页面上运行，所以<strong>必须刷新过页面</strong>（装完扩展后的第一次、或改完代码后）。</li>
 <li>点单词发音依赖<strong>系统自带的英文语音包</strong>（Windows / macOS 都自带）。系统里若没有英文语音则会没声音，但不影响其他功能。</li>

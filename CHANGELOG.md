@@ -4,6 +4,33 @@
 
 ---
 
+## [1.5.0] — 2026-10-18
+
+### 修复
+- 🐞 **YouTube 原生字幕兜底其实从来没生效过**（重要）：
+  `content.js` 里直接读 `window.ytInitialPlayerResponse`，但 content script 跑在**隔离世界**，
+  读不到页面 JS 的全局变量，那个值恒为 `undefined`。也就是说
+  「没开沉浸式翻译时自动回退抓 YouTube 原生字幕」这句承诺一直是空头支票。
+  现在改成两级：新增 `youtube-bridge.js` 在 **MAIN world** 读页面变量、只把**字幕轨地址**递出来
+  （不传内容、不 eval），再由 service worker 下载并解析 `fmt=json3`（不受页面 CORS 约束）。
+  代价是需要 **Chrome / Edge 111+** —— `manifest.json` 已加 `minimum_chrome_version: "111"`。
+- 🚫 原生字幕轨不再退而求其次用 `tracks[0]`：抓到一轨非英文字幕对四级词表毫无意义，只是白下载一次。
+- 🔁 桥接取轨道加了一次重试：页面的播放器变量可能比 `document_start` 晚一拍才就绪。
+
+### 新增
+- 🧹 **基础词过滤**：`a / the / of / be / go` 等约 70 个基础词不再进题堆。
+  只在**显示层**隐藏 —— 存储里的原始记录一个字不删，搜索框里输入仍能查到，
+  顶部用「基础 N」交代隐藏了多少个，免得让人以为词丢了。
+- 🎲 **选项顺序固定**：出题打乱从 `Math.random()` 改成「按单词哈希播种」的确定性打乱
+  （FNV-1a + 固定种子 Fisher-Yates）。同一个词每次打开的选项顺序完全一样，
+  不会再出现"昨天答案是 B、今天变成 C"这种让人怀疑自己的情况。
+
+### 兼容
+- 已采集的记录、已斩词、时间点数据**全部不受影响**。
+- 浏览器低于 111 **装不上新版**（`minimum_chrome_version` 是硬限制）；这种情况下继续用 1.4.0 即可。
+
+---
+
 ## [1.4.0] — 2026-10-15
 
 ### 新增
@@ -77,6 +104,7 @@
 
 ---
 
+[1.5.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.5.0
 [1.4.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.4.0
 [1.3.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.3.0
 [1.2.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.2.0
