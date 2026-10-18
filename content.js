@@ -15,6 +15,42 @@
   let seenSentences = new Map(); // sentence -> 首次时间戳(秒)
   let currentText = '';          // 当前容器里显示的文字（用于判断是否变化）
 
+  // ============ 采集状态上报 ============
+  // 目的：抓不到词时让用户知道卡在哪一步（找不到容器 / 等待字幕 / 正在收集 / 读不到）。
+  // 用「状态 + 每 10 句一个桶」去重，避免每来一句字幕就多发一条消息。
+  let lastStatusKey = '';
+  let savedOnce = false;         // 至少成功落盘过一次
+  let lastRoundTripMs = null;    // 最近一次「字幕变化 → 后台确认」的往返耗时
+
+  function reportStatus(status, detail) {
+    const videoId = getVideoId();
+    const cueCount = seenSentences.size;
+    const key = [videoId, status, detail || '', Math.floor(cueCount / 10), savedOnce].join('|');
+    if (key === lastStatusKey) return;
+    lastStatusKey = key;
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: 'CAPTURE_STATUS',
+          videoId: videoId,
+          title: getVideoTitle(),
+          status: status,
+          detail: detail || '',
+          cueCount: cueCount,
+          saved: savedOnce,
+          roundTripMs: lastRoundTripMs,
+          at: Date.now(),
+        },
+        () => {
+          // 后台可能还没醒，忽略；下一次字幕变化会再报
+          if (chrome.runtime.lastError) { /* noop */ }
+        }
+      );
+    } catch (e) {
+      /* noop */
+    }
+  }
+
   function getVideo() {
     return document.querySelector('video');
   }
@@ -98,6 +134,7 @@
 
     if (!seenSentences.has(text)) {
       seenSentences.set(text, t);
+      reportStatus('collecting', '沉浸式翻译的双语字幕');
     }
     flushCaptions();
   }
@@ -110,14 +147,28 @@
       cues.push({ start: start, text: text });
     }
     if (cues.length === 0) return;
-    chrome.runtime.sendMessage({
-      type: 'CAPTIONS',
-      videoId: videoId,
-      title: getVideoTitle(),
-      language: 'en',
-      cues: cues,
-      source: 'immersive-translate',
-    });
+    const t0 = performance.now();
+    chrome.runtime.sendMessage(
+      {
+        type: 'CAPTIONS',
+        videoId: videoId,
+        title: getVideoTitle(),
+        language: 'en',
+        cues: cues,
+        source: 'immersive-translate',
+      },
+      (resp) => {
+        if (chrome.runtime.lastError) {
+          reportStatus('error', '后台没响应（扩展可能需要重新加载）');
+          return;
+        }
+        if (resp && resp.ok) {
+          savedOnce = true;
+          lastRoundTripMs = Math.round(performance.now() - t0);
+          reportStatus('collecting', '沉浸式翻译的双语字幕');
+        }
+      }
+    );
   }
 
   // 供 popup 查询"现在累积了多少"
@@ -147,6 +198,7 @@
 
   function startCaptionObserver() {
     if (captionObserver) return;
+    reportStatus('connecting', '正在查找沉浸式翻译的字幕容器');
     // 先观察已存在的容器（观察目标是 shadowRoot，字幕变化在里面）
     const tryObserve = () => {
       const root = getCaptionRoot();
@@ -157,6 +209,7 @@
           subtree: true,
           characterData: true,
         });
+        reportStatus('waiting', '字幕容器已连接，等待第一句字幕');
         onCaptionChanged(); // 立即读一次当前字幕
       }
     };
@@ -173,6 +226,9 @@
   function resetState() {
     seenSentences = new Map();
     currentText = '';
+    savedOnce = false;
+    lastRoundTripMs = null;
+    lastStatusKey = ''; // 换视频了，状态要能重新发一遍
   }
 
   // ============ 备用通道：YouTube 原生字幕 ============
@@ -251,20 +307,38 @@
         const tracks = await requestYoutubeTracks(2500);
         track = pickTrack(tracks);
       }
-      if (!track) return;
+      if (!track) {
+        reportStatus('no_captions', '这个 YouTube 页面里没有可读的英文字幕轨');
+        return;
+      }
       const cues = await fetchYoutubeCues(track, videoId);
-      if (!cues || cues.length === 0) return;
+      if (!cues || cues.length === 0) {
+        reportStatus('no_captions', '拿到了字幕轨地址，但没有解析出文本');
+        return;
+      }
       lastVideoId = videoId;
-      chrome.runtime.sendMessage({
-        type: 'CAPTIONS',
-        videoId: videoId,
-        title: getVideoTitle(),
-        language: track.languageCode || 'unknown',
-        cues: cues,
-        source: 'youtube-native',
-      });
+      const t0 = performance.now();
+      chrome.runtime.sendMessage(
+        {
+          type: 'CAPTIONS',
+          videoId: videoId,
+          title: getVideoTitle(),
+          language: track.languageCode || 'unknown',
+          cues: cues,
+          source: 'youtube-native',
+        },
+        (resp) => {
+          if (chrome.runtime.lastError) return;
+          if (resp && resp.ok) {
+            savedOnce = true;
+            lastRoundTripMs = Math.round(performance.now() - t0);
+            reportStatus('collecting', 'YouTube 原生字幕轨（' + (track.languageCode || 'en') + '）');
+          }
+        }
+      );
     } catch (e) {
       console.warn('[YT-CET4] 原生字幕兜底失败:', e);
+      reportStatus('error', '原生字幕兜底失败：' + ((e && e.message) || e));
     }
   }
 

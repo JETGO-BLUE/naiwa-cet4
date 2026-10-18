@@ -726,6 +726,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
+      // 采集状态：content script 上报，popup 读出来显示成一行状态
+      case 'CAPTURE_STATUS': {
+        const st = {
+          videoId: String(msg.videoId || '').slice(0, 64),
+          title: String(msg.title || '').slice(0, 300),
+          status: String(msg.status || 'waiting').slice(0, 24),
+          detail: String(msg.detail || '').slice(0, 200),
+          cueCount: Math.max(0, Number(msg.cueCount) || 0),
+          saved: !!msg.saved,
+          roundTripMs:
+            msg.roundTripMs != null && Number.isFinite(Number(msg.roundTripMs))
+              ? Math.round(Number(msg.roundTripMs))
+              : null,
+          at: Date.now(),
+        };
+        await chrome.storage.local.set({ captureStatus: st });
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case 'GET_CAPTURE_STATUS': {
+        const d = await chrome.storage.local.get('captureStatus');
+        sendResponse({ ok: true, status: d.captureStatus || null });
+        break;
+      }
+
       case 'GET_STATUS': {
         const d = await chrome.storage.local.get('lastStatus');
         sendResponse({ ok: true, status: d.lastStatus || null });

@@ -23,6 +23,7 @@ let swipeStartX = null;
 let swipeMoved = false;
 let swipeEndAt = 0; // 刚划完的时间戳，用来吃掉紧随其后的那次 click
 let basicHiddenCount = 0; // 本次被隐藏的基础词数量（只用于提示）
+let captureStatus = null; // content script 上报的采集状态
 
 // ============ 基础词过滤 ============
 // a / the / of / be / go 这类词放题堆里就是噪音。
@@ -141,6 +142,10 @@ let lastStatus = null;
 let contentAlive = null; // null=未知, true=content 响应了, false=没注入
 let contentDebug = null; // content 返回的诊断信息
 async function init() {
+  // 0) 采集状态（content script 上报的，抓不到词时靠它看卡在哪一步）
+  const cap = await send({ type: 'GET_CAPTURE_STATUS' });
+  captureStatus = (cap && cap.status) || null;
+
   // 1) 先问当前标签页 content script（实时累积，不用等存储）
   const cs = await sendToContent({ type: 'GET_STATE' });
   contentAlive = !!(cs && cs.ok);
@@ -197,6 +202,37 @@ function render(opts) {
   }
   renderCurrent(opts).catch((err) => console.error('[popup] renderCurrent 出错', err));
   renderFamiliar();
+  renderCaptureStatus();
+}
+
+// ============ 采集状态条 ============
+// 一行小字 + 一个点：让用户一眼看出是「没连上」「在等字幕」还是「已经在收了」。
+function renderCaptureStatus() {
+  const el = document.getElementById('capStatus');
+  const txt = document.getElementById('capStatusText');
+  if (!el || !txt) return;
+
+  const st = captureStatus;
+  if (!st || !st.status) {
+    el.dataset.state = 'idle';
+    el.title = '打开一个视频页并让字幕出现，这里会显示采集进度';
+    txt.textContent = '尚未开始采集';
+    return;
+  }
+
+  const short = {
+    connecting: '正在连接字幕…',
+    waiting: '已连接，等待字幕出现',
+    collecting: '正在收集 · ' + (st.cueCount || 0) + ' 句',
+    no_captions: '读不到字幕',
+    error: '抓取出错',
+  }[st.status] || st.status;
+
+  const full = short + (st.detail ? ' · ' + st.detail : '');
+  el.dataset.state = st.status;
+  el.title = full; // 被 CSS 截断时鼠标悬停能看全文
+  // 出错/读不到时直接把原因摊开，省得用户再点诊断
+  txt.textContent = st.status === 'error' || st.status === 'no_captions' ? full : short;
 }
 
 // 渲染 content 诊断信息（排查"收不到字幕"用）
@@ -877,6 +913,8 @@ function bindDeckKeyboard() {
     if (currentTab !== 'current') return;
     const panel = document.getElementById('detailPanel');
     if (panel && panel.classList.contains('open')) return;
+    const diag = document.getElementById('diagPanel');
+    if (diag && diag.classList.contains('open')) return;
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'ArrowLeft') {
@@ -991,6 +1029,103 @@ document.getElementById('detailPanel').addEventListener('click', (e) => {
     e.currentTarget.classList.remove('open');
   }
 });
+
+// ============ 诊断面板 ============
+// 把「卡在哪一步」摊开：采集状态、字幕容器、当前记录。数据全在本地，不做任何上报。
+function openDiagnostics() {
+  renderDiagnostics();
+  document.getElementById('diagPanel').classList.add('open');
+}
+
+function renderDiagnostics() {
+  const box = document.getElementById('diagBody');
+  if (!box) return;
+  const st = captureStatus || {};
+  const d = contentDebug || {};
+
+  const rows = (pairs) =>
+    pairs
+      .map(
+        (p) =>
+          '<div class="diag-row"><b>' +
+          escapeHtml(p[0]) +
+          '</b><span>' +
+          p[1] +
+          '</span></div>'
+      )
+      .join('');
+
+  let html = '<div class="diag-sec"><h4>采集</h4>';
+  html += rows([
+    ['状态', escapeHtml(st.status || '未知')],
+    ['说明', escapeHtml(st.detail || '—')],
+    ['已读字幕', String(st.cueCount || 0) + ' 句'],
+    ['已落盘', st.saved ? '<span class="diag-ok">是</span>' : '否'],
+    [
+      '保存耗时',
+      st.roundTripMs != null ? st.roundTripMs + ' ms（字幕变化 → 后台确认）' : '—',
+    ],
+    [
+      '状态时间',
+      st.at ? new Date(st.at).toLocaleTimeString('zh-CN', { hour12: false }) : '—',
+    ],
+  ]);
+  html += '</div>';
+
+  html += '<div class="diag-sec"><h4>字幕容器</h4>';
+  if (d.hostFound === undefined) {
+    html +=
+      '<div class="diag-row"><b>—</b><span>当前页面没回诊断信息（不是视频页，或页面还没刷新过）</span></div>';
+  } else {
+    html += rows([
+      [
+        '容器',
+        d.hostFound ? '<span class="diag-ok">✅ 找到</span>' : '<span class="diag-bad">❌ 未找到</span>',
+      ],
+      ['Shadow DOM', d.hasShadowRoot ? '✅ 有' : '❌ 无'],
+      ['英文行', String(d.sourceCueCount || 0) + ' 个'],
+      ['中文行', String(d.targetCueCount || 0) + ' 个'],
+      ['样例', d.rootTextSample ? escapeHtml(d.rootTextSample) : '—'],
+    ]);
+  }
+  html += '</div>';
+
+  html += '<div class="diag-sec"><h4>当前记录</h4>';
+  if (currentRecord) {
+    const words = currentRecord.words || [];
+    const times = words.reduce((n, w) => n + ((w.times || []).length || 0), 0);
+    html += rows([
+      ['视频 ID', escapeHtml(currentRecord.videoId || '—')],
+      ['四级词', String(words.length)],
+      ['时间点', String(times)],
+      ['来源', escapeHtml(currentRecord.source || '—')],
+    ]);
+  } else {
+    html += '<div class="diag-row"><b>—</b><span>还没有当前视频的记录</span></div>';
+  }
+  html += '</div>';
+
+  box.innerHTML = html;
+}
+
+document.getElementById('diagBtn').addEventListener('click', openDiagnostics);
+document.getElementById('diagClose').addEventListener('click', () => {
+  document.getElementById('diagPanel').classList.remove('open');
+});
+document.getElementById('diagPanel').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+// 采集状态有更新就刷新状态条（弹窗开着的时候也能看到进度）
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.captureStatus) return;
+    captureStatus = changes.captureStatus.newValue || null;
+    renderCaptureStatus();
+  });
+} catch (e) {
+  /* 老环境没有 storage.onChanged 时静默跳过 */
+}
 
 // 启动
 bindCurrentDelegation();
