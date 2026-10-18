@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>词表与题库来源 · 奶娃过四级</title>
+<meta name="description" content="奶娃过四级所附词表数据的来源、许可与校验值。">
+<style>
+  :root{
+    --bg:#fbfaf8; --card:#ffffff; --text:#23201c; --muted:#6b6459;
+    --line:#e8e3da; --accent:#c2572a; --accent-soft:#fdf1ea; --ok:#2f7d52;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:0 22px}
+  header{
+    background:linear-gradient(160deg,#fff6f0 0%,#fdf1ea 55%,#fbfaf8 100%);
+    border-bottom:1px solid var(--line);padding:30px 0;
+  }
+  header .inner{display:flex;align-items:center;gap:14px}
+  header img{width:44px;height:44px;border-radius:11px}
+  header h1{font-size:22px;margin:0}
+  header .sub{color:var(--muted);font-size:14px;margin:2px 0 0}
+  main{padding:34px 0 70px}
+  h2{font-size:20px;margin:38px 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:26px 0 8px}
+  p{margin:12px 0}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(194,87,42,.32)}
+  a:hover{border-bottom-color:var(--accent)}
+  code{background:#f4f1ec;padding:2px 6px;border-radius:5px;
+       font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;background:var(--card);
+        border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:#faf7f3;font-weight:600}
+  tbody tr:last-child td{border-bottom:0}
+  .src{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:14px 0}
+  .src h3{margin-top:0}
+  .kv{font-size:14px;color:var(--muted);line-height:1.9}
+  .kv b{color:var(--text);font-weight:600}
+  .warn{background:var(--accent-soft);border:1px solid #f2dccd;border-radius:10px;
+        padding:14px 18px;color:#5c4b3e;font-size:14.5px}
+  .ok{background:#f2f9f4;border:1px solid #d5e9dc;border-radius:10px;padding:14px 18px;color:#3a4a40;font-size:14.5px}
+  footer{border-top:1px solid var(--line);padding:24px 0 44px;text-align:center;color:var(--muted);font-size:13.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap inner">
+    <img src="logo-300.png" alt="奶娃过四级">
+    <div>
+      <h1>词表与题库来源</h1>
+      <p class="sub">奶娃过四级 · 数据来源、许可与校验值</p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<p>本扩展里的单词来自下面几个公开词表。每个词表的来源、固定版本和校验值都记录在仓库的
+<code>vocabulary-sources.json</code> 里，可用 <code>scripts/build-vocab-data.py</code> 复现。</p>
+
+<h2>一、四个词库</h2>
+
+<table>
+  <thead>
+    <tr><th>选项</th><th>条数</th><th>来源</th><th>许可</th><th>释义</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>四级</b></td>
+      <td>4,590</td>
+      <td>项目原有 <code>eeliu/english-vocabulary</code> 四级表 + 52 个手补基础词</td>
+      <td>沿用原项目数据</td>
+      <td>中文</td>
+    </tr>
+    <tr>
+      <td><b>六级</b></td>
+      <td>2,219</td>
+      <td>OpenEtymology CET6</td>
+      <td><b>CC BY-SA 4.0</b></td>
+      <td>源数据只有词头；中文释义由下面的「补充释义」提供</td>
+    </tr>
+    <tr>
+      <td><b>雅思</b></td>
+      <td>1,000</td>
+      <td>WordLevel TOEFL &amp; IELTS Essential Vocabulary</td>
+      <td>MIT</td>
+      <td>英文（源数据）；中文释义同样由「补充释义」提供</td>
+    </tr>
+    <tr>
+      <td><b>补充释义</b></td>
+      <td>1,453</td>
+      <td>ECDICT（+ 少量 Wiktionary）</td>
+      <td>MIT（见下方说明）</td>
+      <td>中文</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="warn">
+  <b>关于「雅思」这个名字：</b>这一项其实是<strong>社区整理、含 AI 增补的 TOEFL / IELTS 共用学术词表</strong>，
+  只有 1,000 词，<strong>不是官方雅思词表，也不是雅思专属</strong>，更不代表完整的雅思词汇范围。
+  界面上为了简短显示成「雅思」，完整说明在这里交代清楚。
+</div>
+
+<h2>二、逐个来源</h2>
+
+<div class="src">
+  <h3>OpenEtymology CET6（六级）</h3>
+  <div class="kv">
+    <b>仓库</b>：<a href="https://github.com/openetymology/OpenEtymology" target="_blank" rel="noopener">openetymology/OpenEtymology</a><br>
+    <b>固定提交</b>：<code>7d89f3697abf26e305fe2627f181b692c2c10b28</code><br>
+    <b>文件</b>：<code>CET6/CET6.txt</code><br>
+    <b>源文件 SHA-256</b>：<code>9a8fa3f2464a39526472211228ef1f331ab1e3d67567b11eea49efc7444d5647</code><br>
+    <b>许可</b>：<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>
+    （全文随扩展分发在 <code>licenses/CC-BY-SA-4.0.txt</code>）<br>
+    <b>本项目改动</b>：词头转小写、去重、按字母排序、转成 <code>{"词": ""}</code> 的 JSON；<b>没有新增释义</b>。
+  </div>
+</div>
+
+<div class="src">
+  <h3>WordLevel TOEFL &amp; IELTS Essential Vocabulary（雅思）</h3>
+  <div class="kv">
+    <b>仓库</b>：<a href="https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset" target="_blank" rel="noopener">gungorkaya-eng/toefl-essential-vocabulary-dataset</a><br>
+    <b>固定提交</b>：<code>85d4392a2254d2a1ad73cf12cdd8898b49cd3295</code><br>
+    <b>文件</b>：<code>toefl_essential_vocabulary.json</code><br>
+    <b>源文件 SHA-256</b>：<code>1771a0b444f8a3141339c07474336fdf1336d2f966bef3d13a2a8fd64f9ea885</code><br>
+    <b>许可</b>：MIT，Copyright (c) 2026 gungorkaya-eng（<code>licenses/ielts-LICENSE.txt</code>）<br>
+    <b>作者</b>：gungorkaya-eng / WordLevel（<a href="https://wordlevel.net" target="_blank" rel="noopener">wordlevel.net</a>）<br>
+    <b>本项目改动</b>：词头转小写、按字母排序；英文释义前加词性缩写，<b>未译成中文</b>。
+  </div>
+</div>
+
+<div class="src">
+  <h3>补充释义（1,453 条中文）</h3>
+  <div class="kv">
+    <b>用途</b>：四级词表以外、但六级/雅思词库里有的那批词，用它们的中文释义，
+    让六级和雅思模式也能<b>离线出中文四选一</b>，而不是每次都得联网查。<br>
+    <b>来源</b>：ECDICT 中文释义为主，少量按 Wiktionary 固定修订整理。<br>
+    <b>许可</b>：MIT，Copyright (c) 2025 Linwei（<code>licenses/ecdict-LICENSE.txt</code>）<br>
+    <b>本项目改动</b>：只取释义本体，按词性补前缀；丢掉上游的干扰项和规则说明（省约 660 KB）。
+  </div>
+</div>
+
+<div class="warn">
+  <b>溯源限制（必须说清楚）：</b>ECDICT 的仓库级声明是 MIT，但它的 README 说明这是<strong>多来源汇编</strong>，
+  单个词条没有保留上游出处。本项目依据仓库级 MIT 声明复用这批释义，并在此公开记录这一限制 ——
+  <b>如果你要商用或再分发，请自行评估这个不确定性。</b>
+  另外这 1,453 条释义是自动整理的，<strong>没有逐条人工校审</strong>。
+</div>
+
+<h2>三、题目的干扰项从哪来</h2>
+
+<p>四级题的 3 个干扰释义来自 <code>quiz_bank.json</code>：由四级词表离线计算，
+按「形近 / 同词性 / 易混淆」挑选，并做了释义级去重，避免"两个选项都对"。
+题库覆盖全部 4,590 个四级词，<b>出题和判分全程在本机，不联网</b>。</p>
+
+<p>六级 / 雅思词若不在四级词表内，出题时从<b>合并后的释义池</b>里现场挑干扰项，
+挑法和四级一致（词性相同优先、汉字重合度低的优先）。</p>
+
+<h2>四、许可与再分发</h2>
+
+<div class="ok">
+  <b>代码</b>：MIT（见仓库根目录 <code>LICENSE</code>）。<br>
+  <b>数据</b>：各数据文件沿用各自来源的许可 —— <code>cet6_words.json</code> 是
+  <b>CC BY-SA 4.0</b>，其余是 MIT。四份许可全文都在 <code>licenses/</code> 目录。<br>
+  <b>换句话说</b>：这个仓库<b>不是完全的 MIT</b>，六级词表那部分要遵守 CC BY-SA 的署名与相同方式共享。
+  在仓库内个人使用没问题；如果你要打包再分发，请把上面的署名一起带上。
+</div>
+
+<h2>五、复现</h2>
+
+<pre style="background:#f7f4ef;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:13.5px;line-height:1.7"><code style="background:none;padding:0">python scripts/build-vocab-data.py \
+    --fetch \
+    --extras quiz_extras.json</code></pre>
+
+<p>脚本会先校验源文件的 SHA-256（不一致直接退出），再生成三个数据文件，
+最后把来源、条目数和输出哈希写回 <code>vocabulary-sources.json</code>。
+扩展运行时不会调用这个脚本，也不下载任何词表。</p>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><a href="index.html">返回首页</a> · <a href="privacy.html">隐私政策</a> · <a href="使用说明.html">使用说明</a></p>
+    <p>© 2026 奶娃过四级 · 与 OpenEtymology、WordLevel、ECDICT、YouTube 等第三方无隶属关系</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -72,12 +72,20 @@
 ├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
 ├── youtube-bridge.js      # 只跑在 YouTube 的 MAIN world：把播放器里的字幕轨元数据递出来
 ├── popup.html / popup.js  # 弹窗界面：卡片牌堆答题、详情、斩词、历史
-├── cet4_words.json        # 四级词表（约 4590 词）
-├── quiz_bank.json         # 出题题库：每个词的 3 个形近/易混干扰释义（本地生成）
+├── cet4_words.json        # 四级词表（4590 词，带中文释义）
+├── cet6_words.json        # 六级词头（2219 词，CC BY-SA 4.0，源数据无释义）
+├── ielts_words.json       # 雅思/学术词表（1000 词，带英文释义）
+├── vocab_extra_meanings.json  # 非四级词的中文释义（1453 条，让六级/雅思能离线出题）
+├── quiz_bank.json         # 出题题库：每个四级词的 3 个形近/易混干扰释义（本地生成）
+├── vocabulary-sources.json    # 上面几个数据文件的来源、许可、校验值
+├── licenses/              # 第三方数据许可全文（CC BY-SA 4.0 / MIT ×2）
+├── scripts/
+│   └── build-vocab-data.py    # 按固定 commit 重建词库数据（构建期用，运行时不调用）
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
 │   ├── privacy.html       # 隐私政策（公开可访问）
+│   ├── vocabulary-sources.html  # 词表与题库来源（署名页）
 │   ├── 使用说明.md / 使用说明.html
 │   ├── logo-300.png       # 页面页头图标
 │   └── screenshots/       # 界面截图
@@ -171,7 +179,16 @@ git push origin v1.4.0
 
 ## 许可
 
-[MIT](LICENSE)
+**代码**：[MIT](LICENSE)
+
+**数据**：`cet4_words.json` / `quiz_bank.json` 沿用原项目；`cet6_words.json` 是
+**CC BY-SA 4.0**（OpenEtymology CET6）；`ielts_words.json` 是 MIT（WordLevel）；
+`vocab_extra_meanings.json` 以 ECDICT 为主整理（仓库级 MIT，上游为多来源汇编）。
+
+⚠️ **因为这个仓库带了 CC BY-SA 4.0 的六级词表，它不算「完全的 MIT」** ——
+数据文件各自沿用来源许可，再分发时请把署名带上。
+完整来源、固定 commit、校验值和许可全文见
+[`docs/vocabulary-sources.html`](docs/vocabulary-sources.html) 与 [`licenses/`](licenses/)。
 
 ---
 
