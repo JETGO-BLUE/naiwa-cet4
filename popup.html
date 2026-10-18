@@ -425,6 +425,84 @@
       color: var(--text);
       font-family: "Segoe UI", "PingFang SC", sans-serif;
     }
+    /* ===== 词库切换小弹窗（点「四级 ▾」向下弹出） ===== */
+    .dict-pop {
+      position: fixed;
+      z-index: 120;
+      width: 236px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .16);
+      padding: 6px;
+      font-size: 12.5px;
+    }
+    .dict-pop[hidden] { display: none; }
+    .dict-pop-head { font-size: 11px; color: var(--sub); padding: 3px 7px 6px; }
+    .dict-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 7px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .dict-item:hover { background: var(--bg); }
+    .dict-item.active { background: var(--tag); }
+    .dict-item .di-tick {
+      flex: 0 0 11px;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .dict-item .di-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dict-item .di-name em {
+      font-style: normal;
+      font-size: 10px;
+      color: var(--sub);
+      margin-left: 3px;
+    }
+    .dict-item .di-count { flex-shrink: 0; font-size: 11px; color: var(--sub); font-family: monospace; }
+    .dict-item .di-del {
+      flex-shrink: 0;
+      border: 0;
+      background: none;
+      color: var(--sub);
+      font-size: 12px;
+      line-height: 1;
+      padding: 0 2px;
+      cursor: pointer;
+    }
+    .dict-item .di-del:hover { color: var(--accent); }
+    .dict-pop-sep { height: 1px; background: var(--border); margin: 6px 2px; }
+    .dict-import {
+      width: 100%;
+      text-align: left;
+      padding: 7px;
+      border: 0;
+      border-radius: 6px;
+      background: none;
+      color: var(--tag-text);
+      font-family: inherit;
+      font-size: 12.5px;
+      cursor: pointer;
+    }
+    .dict-import:hover { background: var(--tag); }
+    .dict-src {
+      display: block;
+      padding: 4px 7px 2px;
+      font-size: 11px;
+      color: var(--sub);
+      text-decoration: none;
+    }
+    .dict-src:hover { color: var(--accent); }
+
     /* 诊断面板里的键值行 */
     .diag-sec { margin-bottom: 6px; }
     .diag-sec h4 {
@@ -563,6 +641,26 @@
     }
     .deck-count b { color: var(--text); font-size: 15px; }
     .deck-stat b { color: var(--text); }
+    /* 词库小标签：贴在「第 n / N 题」右边，平时就两个字，不占地方 */
+    .dict-chip {
+      margin-left: 6px;
+      padding: 1px 6px 1px 7px;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 16px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--tag-text);
+      cursor: pointer;
+      vertical-align: 1px;
+      white-space: nowrap;
+    }
+    .dict-chip:hover { border-color: var(--tag-text); background: var(--tag); }
+    .dict-chip.open { border-color: var(--tag-text); background: var(--tag); }
+    .dict-chip i { font-style: normal; font-size: 9px; opacity: .6; margin-left: 1px; }
+    .empty-dict { margin-top: 16px; }
+    .empty-dict .dict-chip { margin-left: 0; font-size: 12px; padding: 3px 9px; }
     .deck-bar {
       height: 4px;
       background: var(--border);
@@ -743,6 +841,16 @@
       <div id="diagBody"></div>
     </div>
   </div>
+
+  <!-- 词库切换小弹窗（点「四级 ▾」向下弹出） -->
+  <div class="dict-pop" id="dictPop" hidden>
+    <div class="dict-pop-head">选择词库（当前视频按词库筛选）</div>
+    <div id="dictList"></div>
+    <div class="dict-pop-sep"></div>
+    <button type="button" class="dict-import" id="dictImportBtn">＋ 导入我的词表（JSON / CSV / TXT）</button>
+    <a href="#" class="dict-src" id="dictSrcLink">词表来源与许可 →</a>
+  </div>
+  <input type="file" id="dictFile" accept=".json,.csv,.tsv,.txt,application/json,text/plain,text/csv" hidden />
 
   <script src="popup.js"></script>
 </body>

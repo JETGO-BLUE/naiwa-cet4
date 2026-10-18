@@ -24,6 +24,7 @@ let swipeMoved = false;
 let swipeEndAt = 0; // 刚划完的时间戳，用来吃掉紧随其后的那次 click
 let basicHiddenCount = 0; // 本次被隐藏的基础词数量（只用于提示）
 let captureStatus = null; // content script 上报的采集状态
+let dictState = { selected: 'cet4', dicts: [] }; // 当前词库 + 可选词库列表
 
 // ============ 基础词过滤 ============
 // a / the / of / be / go 这类词放题堆里就是噪音。
@@ -142,7 +143,10 @@ let lastStatus = null;
 let contentAlive = null; // null=未知, true=content 响应了, false=没注入
 let contentDebug = null; // content 返回的诊断信息
 async function init() {
-  // 0) 采集状态（content script 上报的，抓不到词时靠它看卡在哪一步）
+  // 0) 词库列表（必须先拿到，否则渲染时不知道该按哪个词库筛选）
+  await loadDicts();
+
+  // 0.5) 采集状态（content script 上报的，抓不到词时靠它看卡在哪一步）
   const cap = await send({ type: 'GET_CAPTURE_STATUS' });
   captureStatus = (cap && cap.status) || null;
 
@@ -305,15 +309,23 @@ async function renderCurrent(opts) {
     return;
   }
 
-  const all = currentRecord.words || [];
+  const allRaw = currentRecord.words || [];
   const slashedSet = new Set(familiarWords);
+  const sel = dictState.selected || 'cet4';
 
-  // ① 基础词（a / the / of …）不进题堆，但原始记录保留、搜索仍能查到
+  // ① 先按当前词库筛选（一个词可能同时属于四级 / 六级 / 雅思）
+  //    老记录没有 cats 标注 → 当四级词处理，不然升级后旧记录会整片消失
+  const all = allRaw.filter((w) => {
+    if (!Array.isArray(w.cats) || w.cats.length === 0) return sel === 'cet4';
+    return w.cats.indexOf(sel) >= 0;
+  });
+
+  // ② 基础词（a / the / of …）不进题堆，但原始记录保留、搜索仍能查到
   const learning = all.filter((w) => !isBasicWord(w));
   basicHiddenCount = all.length - learning.length;
 
   const slashedCount = learning.filter((w) => slashedSet.has(w.word)).length;
-  // ② 已经斩过的词汇，不再出现在题堆里
+  // ③ 已经斩过的词汇，不再出现在题堆里
   const active = learning.filter((w) => !slashedSet.has(w.word));
 
   const kw = searchKeyword.trim().toLowerCase();
@@ -328,18 +340,41 @@ async function renderCurrent(opts) {
         )
     : active;
 
+  const dictLabel = currentDictLabel();
+
   // 顶部统计
   const statsHtml = `
     <div class="stats">
-      <div class="stat"><b>${learning.length}</b>四级词</div>
+      <div class="stat"><b>${learning.length}</b>${escapeHtml(dictLabel)}词</div>
       <div class="stat"><b>${active.length}</b>待记</div>
       <div class="stat"><b>${slashedCount}</b>已斩</div>
     </div>`;
 
+  // 空态里也要留一个词库切换入口，否则用户卡在空页面上换不回去
+  const chipHtml =
+    '<div class="empty-dict"><button type="button" class="dict-chip" id="dictChip">' +
+    escapeHtml(dictLabel) +
+    ' <i>▾</i></button></div>';
+
+  if (allRaw.length === 0) {
+    setDeckMode(false);
+    container.innerHTML =
+      statsHtml +
+      '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到四级词汇' +
+      chipHtml +
+      '</div>';
+    return;
+  }
+
   if (all.length === 0) {
     setDeckMode(false);
     container.innerHTML =
-      statsHtml + '<div class="empty"><div class="icon">🔍</div>本视频字幕里没有匹配到四级词汇</div>';
+      statsHtml +
+      '<div class="empty"><div class="icon">🗂️</div>这个视频里没有「' +
+      escapeHtml(dictLabel) +
+      '」词库的词<br/><br/>换个词库看看？' +
+      chipHtml +
+      '</div>';
     return;
   }
 
@@ -354,9 +389,10 @@ async function renderCurrent(opts) {
       statsHtml +
       '<div class="empty"><div class="icon">' + (onlyBasic ? '🫧' : '🎉') + '</div>' +
       (onlyBasic
-        ? '这个视频里只有基础词，没有值得记的四级词'
-        : '这个视频的四级词都被你斩完了<br/><br/>想找回来？切到「已斩词」页，点词后面的 ✕ 即可撤销。') +
+        ? '这个视频里只有基础词，没有值得记的' + escapeHtml(dictLabel) + '词'
+        : '这个视频的' + escapeHtml(dictLabel) + '词都被你斩完了<br/><br/>想找回来？切到「已斩词」页，点词后面的 ✕ 即可撤销。') +
       note +
+      chipHtml +
       '</div>';
     return;
   }
@@ -364,7 +400,12 @@ async function renderCurrent(opts) {
   if (shown.length === 0) {
     setDeckMode(false);
     container.innerHTML =
-      statsHtml + '<div class="empty"><div class="icon">🔍</div>没有匹配「' + escapeHtml(searchKeyword) + '」的单词</div>';
+      statsHtml +
+      '<div class="empty"><div class="icon">🔍</div>没有匹配「' +
+      escapeHtml(searchKeyword) +
+      '」的单词' +
+      chipHtml +
+      '</div>';
     return;
   }
 
@@ -380,6 +421,7 @@ async function renderCurrent(opts) {
 
   setDeckMode(true);
   container.innerHTML = deckHtml(shown);
+  renderDictChip();
 
   // 逐张把题目填进去
   container.querySelectorAll('.deck-card').forEach((card) => {
@@ -433,7 +475,7 @@ function deckHtml(shown) {
   return `
     <div class="deck">
       <div class="deck-top">
-        <div class="deck-count">第 <b class="deck-now">1</b> / <span class="deck-total">${shown.length}</span> 题</div>
+        <div class="deck-count">第 <b class="deck-now">1</b> / <span class="deck-total">${shown.length}</span> 题<button type="button" class="dict-chip" id="dictChip" title="切换词库">四级 <i>▾</i></button></div>
         <div class="deck-stat"></div>
       </div>
       <div class="deck-bar"><i></i></div>
@@ -782,6 +824,12 @@ function bindCurrentDelegation() {
     // 刚划动过的那一下手势，不要当成点击
     if (Date.now() - swipeEndAt < 250) return;
 
+    // 0) 点词库小标签 → 向下弹出词库列表
+    if (e.target.closest('.dict-chip')) {
+      openDictPop();
+      return;
+    }
+
     // 1) 上一题 / 下一题
     const nav = e.target.closest('.deck-prev, .deck-next');
     if (nav) {
@@ -1027,6 +1075,324 @@ function fillOnline(online) {
 document.getElementById('detailPanel').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) {
     e.currentTarget.classList.remove('open');
+  }
+});
+
+// ============ 词库：切换 + 导入 ============
+// 界面上的存在感就一个两字小标签（比如「雅思 ▾」），点开才是完整列表。
+function currentDictLabel() {
+  const d = dictState.dicts.find((x) => x.id === dictState.selected);
+  return d ? d.label : '四级';
+}
+
+async function loadDicts() {
+  const r = await send({ type: 'GET_VOCABULARIES' });
+  if (r && r.ok) {
+    dictState = { selected: r.selected || 'cet4', dicts: r.dicts || [] };
+  }
+  renderDictChip();
+}
+
+function renderDictChip() {
+  const chip = document.getElementById('dictChip');
+  if (!chip) return;
+  const label = currentDictLabel();
+  chip.innerHTML = escapeHtml(label) + ' <i>▾</i>';
+  chip.title = '切换词库（当前：' + label + '）';
+}
+
+function renderDictList() {
+  const box = document.getElementById('dictList');
+  if (!box) return;
+  const sel = dictState.selected;
+  box.innerHTML = dictState.dicts
+    .map((d) => {
+      const active = d.id === sel ? ' active' : '';
+      const tick = d.id === sel ? '✓' : '';
+      const custom = d.kind === 'user' ? '<em>自定义</em>' : '';
+      const del =
+        d.kind === 'user'
+          ? '<button type="button" class="di-del" data-del="' +
+            escapeHtml(d.id) +
+            '" title="删除这个词表">✕</button>'
+          : '';
+      return (
+        '<div class="dict-item' + active + '" data-dict="' + escapeHtml(d.id) + '">' +
+        '<span class="di-tick">' + tick + '</span>' +
+        '<span class="di-name">' + escapeHtml(d.label) + custom + '</span>' +
+        '<span class="di-count">' + (d.count || 0) + '</span>' +
+        del +
+        '</div>'
+      );
+    })
+    .join('');
+
+  box.querySelectorAll('.dict-item').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('.di-del')) return;
+      await selectDict(el.getAttribute('data-dict'));
+    });
+  });
+
+  box.querySelectorAll('.di-del').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-del');
+      const d = dictState.dicts.find((x) => x.id === id);
+      if (!confirm('删除词表「' + (d ? d.label : id) + '」？\n\n只删这份导入的词表，收集记录和已斩词不受影响。')) return;
+      const r = await send({ type: 'DELETE_DICT', id: id });
+      if (!r || !r.ok) {
+        alert('删除失败：' + ((r && r.error) || '未知错误'));
+        return;
+      }
+      await loadDicts();
+      renderDictList();
+      render({ reset: true });
+    });
+  });
+}
+
+async function selectDict(id) {
+  if (!id || id === dictState.selected) {
+    closeDictPop();
+    return;
+  }
+  const r = await send({ type: 'SET_VOCABULARY', dictId: id });
+  if (!r || !r.ok) {
+    alert('切换失败：' + ((r && r.error) || '未知错误'));
+    return;
+  }
+  dictState.selected = id;
+  closeDictPop();
+  await loadDicts();
+  render({ reset: true });
+}
+
+function onDocClickForDict(e) {
+  const pop = document.getElementById('dictPop');
+  if (!pop) return;
+  if (pop.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('.dict-chip')) return;
+  closeDictPop();
+}
+
+function openDictPop() {
+  const chip = document.getElementById('dictChip');
+  const pop = document.getElementById('dictPop');
+  if (!chip || !pop) return;
+  renderDictList();
+  pop.hidden = false;
+
+  // 贴着标签正下方弹出；右/下空间不够就贴回去
+  const rect = chip.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const h = pop.offsetHeight;
+  let left = rect.left;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+  let top = rect.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - h - 4);
+  pop.style.left = Math.round(left) + 'px';
+  pop.style.top = Math.round(top) + 'px';
+
+  chip.classList.add('open');
+  // 延后一拍再挂"点外面关闭"，否则这一次点击立刻就把自己关了
+  setTimeout(() => document.addEventListener('click', onDocClickForDict), 0);
+}
+
+function closeDictPop() {
+  const pop = document.getElementById('dictPop');
+  const chip = document.getElementById('dictChip');
+  if (pop) pop.hidden = true;
+  if (chip) chip.classList.remove('open');
+  document.removeEventListener('click', onDocClickForDict);
+}
+
+// ---------- 导入解析：JSON / CSV / TSV / TXT ----------
+function splitCsvLine(line, sep) {
+  const out = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuote) {
+      if (c === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuote = false;
+        }
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQuote = true;
+    } else if (c === sep) {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseDictJson(text) {
+  const data = JSON.parse(text);
+  const words = {};
+  let skipped = 0;
+  const put = (w, m) => {
+    const k = String(w == null ? '' : w).trim().toLowerCase();
+    const v = String(m == null ? '' : m).trim();
+    if (!k || !v) {
+      skipped++;
+      return;
+    }
+    if (!words[k]) words[k] = v;
+  };
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (Array.isArray(item)) put(item[0], item[1]);
+      else if (item && typeof item === 'object') {
+        put(
+          item.word || item.w || item.term || item.headword,
+          item.meaning || item.definition || item.translation || item.zh || item['释义'] || item['中文']
+        );
+      } else {
+        skipped++;
+      }
+    }
+  } else if (data && typeof data === 'object') {
+    const src = data.words && typeof data.words === 'object' ? data.words : data;
+    for (const k of Object.keys(src)) {
+      const v = src[k];
+      if (typeof v === 'string') put(k, v);
+      else if (v && typeof v === 'object') put(k, v.meaning || v.definition || v.translation);
+      else skipped++;
+    }
+  } else {
+    return { words: {}, skipped: 0, error: 'JSON 里既不是对象也不是数组' };
+  }
+  return { words: words, skipped: skipped };
+}
+
+function parseDictLines(text) {
+  const lines = text.split(/\r?\n/);
+  const sample = lines.slice(0, 20).join('\n');
+  let sep = null;
+  if (sample.indexOf('\t') >= 0) sep = '\t';
+  else if (sample.indexOf(',') >= 0) sep = ',';
+  else if (sample.indexOf(';') >= 0) sep = ';';
+
+  const words = {};
+  let skipped = 0;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.charAt(0) === '#') continue;
+    let word;
+    let meaning;
+    if (sep) {
+      const cells = splitCsvLine(line, sep);
+      word = cells[0];
+      meaning = cells.slice(1).join(' ').trim();
+    } else {
+      // 没有分隔符：第一段是单词，剩下整段是释义
+      const m = line.match(/^([A-Za-z][A-Za-z'’-]{0,40})\s+(.+)$/);
+      if (!m) {
+        skipped++;
+        continue;
+      }
+      word = m[1];
+      meaning = m[2];
+    }
+    const k = String(word || '').trim().toLowerCase();
+    const v = String(meaning || '').trim();
+    if (!k || !v) {
+      skipped++;
+      continue;
+    }
+    if (/^(word|单词|词|term|headword)$/.test(k)) continue; // 表头
+    if (!words[k]) words[k] = v;
+  }
+  return { words: words, skipped: skipped };
+}
+
+function parseDictText(text, filename) {
+  const t = String(text || '').replace(/^\uFEFF/, '').trim();
+  if (!t) return { words: {}, skipped: 0, error: '文件是空的' };
+  const ext = String(filename || '').split('.').pop().toLowerCase();
+  const looksJson = t.charAt(0) === '{' || t.charAt(0) === '[';
+  if (ext === 'json' || looksJson) {
+    try {
+      return parseDictJson(t);
+    } catch (e) {
+      return { words: {}, skipped: 0, error: 'JSON 解析失败：' + (e.message || e) };
+    }
+  }
+  return parseDictLines(t);
+}
+
+async function importDictFile(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    alert('文件太大（超过 5 MB），请精简后再导入');
+    return;
+  }
+  let text;
+  try {
+    text = await file.text();
+  } catch (e) {
+    alert('读取文件失败：' + (e.message || e));
+    return;
+  }
+  const parsed = parseDictText(text, file.name);
+  if (parsed.error) {
+    alert('导入失败：' + parsed.error);
+    return;
+  }
+  const count = Object.keys(parsed.words).length;
+  if (count === 0) {
+    alert(
+      '这个文件里没解析出「单词 + 释义」形式的条目。\n\n' +
+        '支持：JSON（{"word":"释义"} 或 [{"word","meaning"}]）、' +
+        'CSV / TSV / TXT（每行「单词,释义」或「单词<Tab>释义」）。'
+    );
+    return;
+  }
+  const name = String(file.name || '我的词表').replace(/\.[^.]+$/, '').slice(0, 40);
+  const r = await send({ type: 'IMPORT_DICT', name: name, words: parsed.words });
+  if (!r || !r.ok) {
+    alert('导入失败：' + ((r && r.error) || '未知错误'));
+    return;
+  }
+  alert(
+    '已导入「' + r.dict.label + '」：' + r.dict.count + ' 条' +
+      (r.dict.skipped ? '（跳过 ' + r.dict.skipped + ' 行无效）' : '')
+  );
+  await send({ type: 'SET_VOCABULARY', dictId: r.dict.id });
+  await loadDicts();
+  closeDictPop();
+  render({ reset: true });
+}
+
+document.getElementById('dictImportBtn').addEventListener('click', () => {
+  document.getElementById('dictFile').click();
+});
+
+document.getElementById('dictFile').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ''; // 允许连续导入同一个文件
+  await importDictFile(file);
+});
+
+document.getElementById('dictSrcLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL('docs/vocabulary-sources.html') });
+  } catch (err) {
+    /* noop */
   }
 });
 
