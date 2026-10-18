@@ -336,11 +336,11 @@ function round1(sec) {
 const MAX_TIMES = 10;        // 每个词最多保留 10 个时间点
 const TIME_BUCKET_SEC = 180; // 时间点按「每 3 分钟」记录一次（3*60 秒一个区）
 
-async function processCaptions(msg) {
-  const vocabMap = await loadVocab();
-  const { videoId, title, cues } = msg;
-
-  const wordMap = new Map(); // surface -> { meaning, lemma, buckets: Map<区号, 精确秒> }
+// 把一批 cues 分词/词形还原/分桶，产出 surface -> { word, lemma, meaning, cats, times[] }
+// times 已经是「每 3 分钟区取最早、按区排序、最多 10 个」的数值秒。
+// 全量重建和增量合并都复用它，保证两种路径算出来的结果一模一样。
+function buildWordEntries(cues, vocabMap) {
+  const wordMap = new Map(); // surface -> { meaning, lemma, cats, buckets: Map<区号, 精确秒> }
 
   for (const cue of cues) {
     const words = extractWords(cue.text, vocabMap);
@@ -363,10 +363,10 @@ async function processCaptions(msg) {
     }
   }
 
-  const result = [];
+  const entries = new Map();
   for (const [word, data] of wordMap) {
     const bucketIds = Array.from(data.buckets.keys()).sort((a, b) => a - b);
-    result.push({
+    entries.set(word, {
       word: word,          // 字幕原样
       lemma: data.lemma,   // 还原词根
       meaning: data.meaning,
@@ -376,7 +376,35 @@ async function processCaptions(msg) {
       times: bucketIds.slice(0, MAX_TIMES).map((b) => data.buckets.get(b)),
     });
   }
+  return entries;
+}
 
+// 把已经存好的 times[]（数值秒）反推回「区号 -> 最早时间」，供增量合并用。
+// 注意：如果某句字幕正好落在 3 分钟边界 ±0.05s 内，round1 可能把它推到相邻区，
+// 反推会差一个区 —— 影响微乎其微（只对边界±50ms 的字幕），不值得为此改存储格式。
+function timesToBuckets(times) {
+  const m = new Map();
+  for (const t of times || []) {
+    const n = Number(t);
+    if (!Number.isFinite(n)) continue;
+    const b = Math.floor(n / TIME_BUCKET_SEC);
+    if (!m.has(b) || n < m.get(b)) m.set(b, n);
+  }
+  return m;
+}
+
+function bucketsToTimes(bm) {
+  return Array.from(bm.entries())
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, MAX_TIMES)
+    .map((e) => e[1]);
+}
+
+async function processCaptions(msg) {
+  const vocabMap = await loadVocab();
+  const { videoId, title, cues } = msg;
+
+  const result = Array.from(buildWordEntries(cues, vocabMap).values());
   result.sort((a, b) => b.times.length - a.times.length);
 
   const key = 'video_' + videoId;
@@ -392,6 +420,63 @@ async function processCaptions(msg) {
   chrome.storage.local.set({ [key]: record });
   chrome.storage.local.set({ lastVideoId: videoId });
   return record;
+}
+
+// 增量采集：把「新句子」合并进已有记录，而不是每次全量重建。
+// 合并按 (3分钟区, 时间) 取最早 —— **天然幂等**：同一条句子被重复发过来，
+// 产生的还是同一个时间点，不会重复，所以这里不需要 wwj 那套 eventId/确认队列。
+async function ingestDelta(msg) {
+  const vocabMap = await loadVocab();
+  const { videoId, title, cues } = msg;
+
+  const delta = buildWordEntries(cues, vocabMap);
+
+  const key = 'video_' + videoId;
+  const data = await chrome.storage.local.get([key, 'lastVideoId']);
+  const prev = data[key] || null;
+
+  // 这一批没命中任何词，也把「当前视频」指针记一下，避免 popup 以为没在采
+  if (delta.size === 0) {
+    if (data.lastVideoId !== videoId) await chrome.storage.local.set({ lastVideoId: videoId });
+    return prev ? decorateRecord(prev) : null;
+  }
+
+  const byWord = new Map();
+  if (prev && Array.isArray(prev.words)) {
+    for (const w of prev.words) if (w && w.word) byWord.set(w.word, w);
+  }
+
+  for (const [surface, entry] of delta) {
+    const existing = byWord.get(surface);
+    if (existing) {
+      const bm = timesToBuckets(existing.times);
+      for (const t of entry.times) {
+        const b = Math.floor(Number(t) / TIME_BUCKET_SEC);
+        if (!bm.has(b) || t < bm.get(b)) bm.set(b, t);
+      }
+      existing.times = bucketsToTimes(bm);
+      if (!existing.meaning) existing.meaning = entry.meaning;
+      if (!existing.cats || !existing.cats.length) existing.cats = entry.cats;
+      if (!existing.lemma || existing.lemma === surface) existing.lemma = entry.lemma;
+    } else {
+      byWord.set(surface, entry);
+    }
+  }
+
+  const words = Array.from(byWord.values());
+  words.sort((a, b) => (b.times ? b.times.length : 0) - (a.times ? a.times.length : 0));
+
+  const record = {
+    videoId: videoId,
+    title: title || (prev && prev.title) || '',
+    words: words,
+    totalWords: words.length,
+    capturedAt: prev && prev.capturedAt ? prev.capturedAt : Date.now(),
+    source: msg.source || (prev && prev.source) || 'immersive-translate',
+  };
+
+  await chrome.storage.local.set({ [key]: record, lastVideoId: videoId });
+  return decorateRecord(record);
 }
 
 // ============ 5. 词形变化生成器（本地，秒出，不联网） ============
@@ -846,6 +931,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'CAPTIONS': {
         const rec = await processCaptions(msg);
         sendResponse({ ok: true, record: decorateRecord(rec) });
+        break;
+      }
+
+      // 增量：content 只发新句子，这里合并进已有记录（幂等，重复发不产生重复点）
+      case 'CAPTIONS_DELTA': {
+        const rec = await ingestDelta(msg);
+        sendResponse({ ok: true, record: rec });
         break;
       }
 

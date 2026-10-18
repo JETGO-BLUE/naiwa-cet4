@@ -13,6 +13,7 @@
   const CAPTION_SELECTOR = '#immersive-translate-caption-window';
   let captionObserver = null;
   let seenSentences = new Map(); // sentence -> 首次时间戳(秒)
+  let sentSentences = new Set(); // 已经成功发给后台的句子（按文本）—— 增量发送的关键
   let currentText = '';          // 当前容器里显示的文字（用于判断是否变化）
 
   // ============ 采集状态上报 ============
@@ -142,19 +143,21 @@
   function flushCaptions() {
     const videoId = getVideoId();
     if (!videoId) return;
-    const cues = [];
+    // 增量：只发还没发过的新句子，后台做幂等合并。
+    // 不用像旧版那样每次把全部累计字幕重发一遍。
+    const delta = [];
     for (const [text, start] of seenSentences) {
-      cues.push({ start: start, text: text });
+      if (!sentSentences.has(text)) delta.push({ start: start, text: text });
     }
-    if (cues.length === 0) return;
+    if (delta.length === 0) return;
     const t0 = performance.now();
     chrome.runtime.sendMessage(
       {
-        type: 'CAPTIONS',
+        type: 'CAPTIONS_DELTA',
         videoId: videoId,
         title: getVideoTitle(),
         language: 'en',
-        cues: cues,
+        cues: delta,
         source: 'immersive-translate',
       },
       (resp) => {
@@ -163,6 +166,8 @@
           return;
         }
         if (resp && resp.ok) {
+          // 后台确认收到才标记已发送；失败的话下次字幕变化会重发
+          for (const c of delta) sentSentences.add(c.text);
           savedOnce = true;
           lastRoundTripMs = Math.round(performance.now() - t0);
           reportStatus('collecting', '沉浸式翻译的双语字幕');
@@ -225,6 +230,7 @@
   // 视频切换时清空累积
   function resetState() {
     seenSentences = new Map();
+    sentSentences = new Set(); // 换视频了，新视频的句子要重新发
     currentText = '';
     savedOnce = false;
     lastRoundTripMs = null;
