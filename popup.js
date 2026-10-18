@@ -25,6 +25,62 @@ let swipeEndAt = 0; // 刚划完的时间戳，用来吃掉紧随其后的那次
 let basicHiddenCount = 0; // 本次被隐藏的基础词数量（只用于提示）
 let captureStatus = null; // content script 上报的采集状态
 let dictState = { selected: 'cet4', dicts: [] }; // 当前词库 + 可选词库列表
+let lastLoadedVideoId = null; // 上次按「做题进度」加载的是哪个视频
+let progressSaveTimer = null; // 防抖：翻页时别每按一次键就写一次盘
+
+// ============ 做题进度持久化 ============
+// 每个视频存一份：做到第几个（用 anchor 单词锚定）+ 哪些词答对/答错过。
+// 这样退出再进，不仅停在原来那张，前后的「已做/未做」状态也都在、顺序也一致。
+async function restoreProgress(videoId) {
+  const r = await send({ type: 'GET_PROGRESS', videoId: videoId });
+  const p = r && r.progress;
+  if (!p) return null;
+  const done = p.done || {};
+  const wrong = p.wrong || {};
+  for (const w of Object.keys(done)) getQuizState(w).solved = true;
+  for (const w of Object.keys(wrong)) {
+    const st = getQuizState(w);
+    if (Array.isArray(wrong[w])) wrong[w].forEach((i) => st.wrong.add(i));
+  }
+  return { index: Number(p.index) || 0, anchor: p.anchor || null };
+}
+
+// 恢复时先找 anchor 那个词（顺序变了也不怕），找不到再退回存的下标
+function resolveResumeIndex(shown, resume) {
+  if (resume.anchor) {
+    const i = shown.findIndex((w) => w.word === resume.anchor);
+    if (i >= 0) return i;
+  }
+  return Math.max(0, Math.min(shown.length - 1, Number(resume.index) || 0));
+}
+
+function saveProgress() {
+  if (!currentRecord || !currentRecord.videoId || !deckWords.length) return;
+  const done = {};
+  const wrong = {};
+  for (const w of deckWords) {
+    const st = quizState.get(w.word);
+    if (!st) continue;
+    if (st.solved) done[w.word] = true;
+    if (st.wrong && st.wrong.size) wrong[w.word] = Array.from(st.wrong);
+  }
+  send({
+    type: 'SAVE_PROGRESS',
+    videoId: currentRecord.videoId,
+    index: deckIndex,
+    anchor: deckWords[deckIndex] ? deckWords[deckIndex].word : null,
+    done: done,
+    wrong: wrong,
+  });
+}
+
+function scheduleSaveProgress() {
+  if (progressSaveTimer) clearTimeout(progressSaveTimer);
+  progressSaveTimer = setTimeout(() => {
+    progressSaveTimer = null;
+    saveProgress();
+  }, 300);
+}
 
 // ============ 基础词过滤 ============
 // a / the / of / be / go 这类词放题堆里就是噪音。
@@ -150,31 +206,45 @@ async function init() {
   const cap = await send({ type: 'GET_CAPTURE_STATUS' });
   captureStatus = (cap && cap.status) || null;
 
-  // 1) 先问当前标签页 content script（实时累积，不用等存储）
+  // 1) 先问当前标签页 content script（哪个视频、有没有正在累积的字幕）
   const cs = await sendToContent({ type: 'GET_STATE' });
   contentAlive = !!(cs && cs.ok);
   contentDebug = cs && cs.state ? cs.state.debug || null : null;
+
+  const activeVideoId = cs && cs.ok && cs.state ? cs.state.videoId : null;
+
+  // 2) content 手里若有还没落盘的字幕，用「增量合并」补进存储。
+  //    ⚠️ 这里以前用 CAPTIONS 全量重建，会把 content 内存里那几句当成全部，
+  //    覆盖掉之前攒的记录 —— 这正是「刷新页面后单词重新开始」的元凶。
   if (cs && cs.ok && cs.state && cs.state.cues && cs.state.cues.length > 0) {
-    // content 有内容，交给 background 处理成单词表并返回记录
-    const rec = await send({
-      type: 'CAPTIONS',
+    await send({
+      type: 'CAPTIONS_DELTA',
       videoId: cs.state.videoId,
       title: cs.state.title,
       language: 'en',
       cues: cs.state.cues,
       source: 'immersive-translate',
     });
-    if (rec && rec.ok && rec.record) {
-      currentRecord = rec.record;
-      const fam = await send({ type: 'GET_FAMILIAR' });
-      familiarWords = fam.familiar || [];
+  }
+
+  // 3) 读「当前页面这个视频」的记录；只有认不出当前视频时，才退回最近一次
+  if (activeVideoId) {
+    const r = await send({ type: 'GET_VIDEO', videoId: activeVideoId });
+    if (r && r.ok && r.record) {
+      currentRecord = r.record;
+      familiarWords = r.familiar || [];
       lastStatus = null;
       render({ reset: true });
       return;
     }
+    // 当前视频还没任何记录 → 走空态，别把上一个视频的词张冠李戴
+    const st = await send({ type: 'GET_STATUS' });
+    if (st && st.ok && st.status) lastStatus = st.status;
+    render({ reset: true });
+    return;
   }
 
-  // 2) 否则读最近一次视频的存储记录
+  // 4) 认不出当前视频（不是视频页 / content 没跑起来）→ 读最近一次记录
   const resp = await send({ type: 'GET_LAST_VIDEO' });
   if (resp && resp.ok && resp.record) {
     currentRecord = resp.record;
@@ -184,7 +254,7 @@ async function init() {
     return;
   }
 
-  // 3) 没有视频记录，查状态（无字幕/错误）
+  // 5) 没有视频记录，查状态（无字幕/错误）
   const st = await send({ type: 'GET_STATUS' });
   if (st && st.ok && st.status) {
     lastStatus = st.status;
@@ -279,6 +349,7 @@ async function renderCurrent(opts) {
   opts = opts || {};
   const container = document.getElementById('currentContent');
   if (!currentRecord) {
+    lastLoadedVideoId = null;
     setDeckMode(false);
     if (lastStatus && lastStatus.type === 'no_captions') {
       container.innerHTML =
@@ -409,10 +480,19 @@ async function renderCurrent(opts) {
     return;
   }
 
+  // 换视频（或首次打开）→ 清答题状态，从存储恢复做题进度
+  const vid = currentRecord.videoId;
+  let resume = null;
+  if (vid !== lastLoadedVideoId) {
+    lastLoadedVideoId = vid;
+    quizState.clear();
+    resume = await restoreProgress(vid);
+  }
+
   // 先把题目准备好（本地题库，一次批量取回）
   await ensureQuizzes(shown);
 
-  const idx = resolveDeckIndex(shown, opts);
+  const idx = resume ? resolveResumeIndex(shown, resume) : resolveDeckIndex(shown, opts);
   const byWord = new Map(shown.map((w) => [w.word, w]));
 
   deckWords = shown;
@@ -546,6 +626,7 @@ function goToDeck(i) {
   deckIndex = next;
   applyDeckPosition();
   updateDeckMeta();
+  scheduleSaveProgress();
 }
 
 // 顶部「✅ / ❌ / 斩」计数 + 全部答完提示
@@ -588,6 +669,7 @@ function scheduleAutoNext(word) {
       deckIndex += 1;
       applyDeckPosition();
       updateDeckMeta();
+      scheduleSaveProgress();
     }
   }, AUTO_NEXT_DELAY);
 }
@@ -871,6 +953,7 @@ function bindCurrentDelegation() {
       }
       if (card) renderQuizBlock(card, { word: word }); // 只重画这一张卡
       updateDeckMeta();
+      saveProgress(); // 答对/答错立刻落盘，弹窗关掉也不丢
       if (justSolved) scheduleAutoNext(word);
       return;
     }
@@ -900,8 +983,10 @@ function bindCurrentDelegation() {
       }
       const resp = await send({ type: 'GET_FAMILIAR' });
       familiarWords = resp.familiar || [];
+      quizState.delete(word); // 斩掉 = 清掉这词的做题状态，撤销后回到"未做"
       const stay = deckIndex;
       render({ stayIndex: stay });
+      setTimeout(saveProgress, 0);
       return;
     }
 

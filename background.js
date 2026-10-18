@@ -18,6 +18,7 @@ const BUILTIN_DICTS = [
   { id: 'ielts', label: '雅思', file: 'ielts_words.json' },
 ];
 const USER_DICTS_KEY = 'userDicts';
+const PROGRESS_KEY = 'quizProgress'; // { [videoId]: {index, anchor, done, wrong} }
 const MAX_USER_DICTS = 5;
 const MAX_USER_DICT_BYTES = 3 * 1024 * 1024;
 
@@ -1115,6 +1116,58 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
+      // ---- 做题进度（每个视频一份：做到第几个 + 哪些答对/答错过） ----
+      case 'GET_PROGRESS': {
+        const videoId = String(msg.videoId || '');
+        if (!videoId) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        const d = await chrome.storage.local.get(PROGRESS_KEY);
+        const all = d[PROGRESS_KEY] || {};
+        sendResponse({ ok: true, progress: all[videoId] || null });
+        break;
+      }
+
+      case 'SAVE_PROGRESS': {
+        const videoId = String(msg.videoId || '');
+        if (!/^[\w-]{1,64}$/.test(videoId)) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        const done = {};
+        const wrong = {};
+        if (msg.done && typeof msg.done === 'object') {
+          for (const k of Object.keys(msg.done)) {
+            if (msg.done[k]) done[String(k).slice(0, 40)] = true; // 只收 truthy，防脏数据
+          }
+        }
+        if (msg.wrong && typeof msg.wrong === 'object') {
+          for (const k of Object.keys(msg.wrong)) {
+            const arr = msg.wrong[k];
+            if (Array.isArray(arr)) {
+              wrong[String(k).slice(0, 40)] = arr
+                .filter((n) => Number.isInteger(n) && n >= 0 && n < 4)
+                .slice(0, 4);
+            }
+          }
+        }
+        // 尺寸保护：一个视频的进度不该大到离谱
+        if (Object.keys(done).length > 5000 || Object.keys(wrong).length > 5000) {
+          sendResponse({ ok: false, error: '进度数据过大' });
+          break;
+        }
+        const index = Number.isFinite(Number(msg.index)) ? Math.max(0, Math.floor(Number(msg.index))) : 0;
+        const anchor = String(msg.anchor || '').slice(0, 40);
+
+        const d = await chrome.storage.local.get(PROGRESS_KEY);
+        const all = d[PROGRESS_KEY] || {};
+        all[videoId] = { index: index, anchor: anchor, done: done, wrong: wrong, at: Date.now() };
+        await chrome.storage.local.set({ [PROGRESS_KEY]: all });
+        sendResponse({ ok: true });
+        break;
+      }
+
       case 'GET_STATUS': {
         const d = await chrome.storage.local.get('lastStatus');
         sendResponse({ ok: true, status: d.lastStatus || null });
@@ -1179,6 +1232,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         await chrome.storage.local.remove('video_' + videoId);
+        // 同步删掉它的做题进度，避免留一份孤儿进度
+        const pd = await chrome.storage.local.get(PROGRESS_KEY);
+        const pall = pd[PROGRESS_KEY] || {};
+        if (pall[videoId]) {
+          delete pall[videoId];
+          await chrome.storage.local.set({ [PROGRESS_KEY]: pall });
+        }
         // 如果它正好是"上次打开的"，一并清掉指针，否则 popup 会一直去捞一个不存在的记录
         const d = await chrome.storage.local.get('lastVideoId');
         if (d.lastVideoId === videoId) await chrome.storage.local.remove('lastVideoId');
