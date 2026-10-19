@@ -32,7 +32,7 @@
     }
     header {
       background: var(--card);
-      padding: 14px 16px;
+      padding: 11px 16px 10px;
       border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
@@ -56,11 +56,43 @@
     .video-title {
       font-size: 12px;
       color: var(--sub);
-      margin-top: 4px;
+      margin-top: 3px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    /* 采集状态条：一个小圆点 + 一句人话，抓不到词时能看出卡在哪一步 */
+    .cap-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11.5px;
+      line-height: 15px;
+      height: 15px;
+      color: var(--sub);
+      margin-top: 3px;
+      overflow: hidden;
+    }
+    .cap-status i {
+      flex-shrink: 0;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #9aa3b2;
+    }
+    .cap-status span {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cap-status[data-state="collecting"] i,
+    .cap-status[data-state="saved"] i { background: #43a047; }
+    .cap-status[data-state="waiting"] i { background: #e0a044; }
+    .cap-status[data-state="no_captions"] i,
+    .cap-status[data-state="error"] i { background: #e0a044; }
+    .cap-status[data-state="hidden"] { display: none; }
     .tabs {
       display: flex;
       background: var(--card);
@@ -81,6 +113,18 @@
       border-bottom-color: var(--accent);
       font-weight: 600;
     }
+    /* 诊断入口：贴在 tab 行最右边 */
+    .diag-btn {
+      flex: 0 0 40px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: var(--card);
+      color: var(--sub);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .diag-btn:hover { color: var(--accent); }
     .toolbar {
       display: flex;
       align-items: center;
@@ -115,6 +159,16 @@
       overflow-y: auto;
       padding: 12px 16px;
       min-height: 0;
+    }
+    /* 三个 tab 页本身也必须是 flex 容器，否则里面 .content 的 flex:1 根本不起作用，
+       内容一高就把底部的牌堆按钮顶出弹窗（这个坑之前一直存在，被状态条挤出来了） */
+    #tab-current,
+    #tab-history,
+    #tab-familiar {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
     /* 卡片模式下，内容区不再自己滚动，交给牌堆自己管 */
     #currentContent.deck-mode {
@@ -177,13 +231,31 @@
       cursor: pointer;
     }
     .video-item:hover { border-color: var(--accent); }
+    .video-item .v-row { display: flex; align-items: flex-start; gap: 8px; }
     .video-item .v-title {
+      flex: 1;
+      min-width: 0;
       font-size: 13px;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .video-del {
+      flex-shrink: 0;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1;
+      padding: 3px 7px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--sub);
+      cursor: pointer;
+      transition: border-color .12s, color .12s;
+    }
+    .video-del:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .video-del:disabled { opacity: .45; cursor: default; }
     .video-item .v-meta { font-size: 12px; color: var(--sub); margin-top: 3px; }
     .muted { color: var(--sub); font-size: 12px; }
 
@@ -353,6 +425,103 @@
       color: var(--text);
       font-family: "Segoe UI", "PingFang SC", sans-serif;
     }
+    /* ===== 词库切换小弹窗（点「四级 ▾」向下弹出） ===== */
+    .dict-pop {
+      position: fixed;
+      z-index: 120;
+      width: 236px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .16);
+      padding: 6px;
+      font-size: 12.5px;
+    }
+    .dict-pop[hidden] { display: none; }
+    .dict-pop-head { font-size: 11px; color: var(--sub); padding: 3px 7px 6px; }
+    .dict-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 7px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .dict-item:hover { background: var(--bg); }
+    .dict-item.active { background: var(--tag); }
+    .dict-item .di-tick {
+      flex: 0 0 11px;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .dict-item .di-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dict-item .di-name em {
+      font-style: normal;
+      font-size: 10px;
+      color: var(--sub);
+      margin-left: 3px;
+    }
+    .dict-item .di-count { flex-shrink: 0; font-size: 11px; color: var(--sub); font-family: monospace; }
+    .dict-item .di-del {
+      flex-shrink: 0;
+      border: 0;
+      background: none;
+      color: var(--sub);
+      font-size: 12px;
+      line-height: 1;
+      padding: 0 2px;
+      cursor: pointer;
+    }
+    .dict-item .di-del:hover { color: var(--accent); }
+    .dict-pop-sep { height: 1px; background: var(--border); margin: 6px 2px; }
+    .dict-import {
+      width: 100%;
+      text-align: left;
+      padding: 7px;
+      border: 0;
+      border-radius: 6px;
+      background: none;
+      color: var(--tag-text);
+      font-family: inherit;
+      font-size: 12.5px;
+      cursor: pointer;
+    }
+    .dict-import:hover { background: var(--tag); }
+    .dict-src {
+      display: block;
+      padding: 4px 7px 2px;
+      font-size: 11px;
+      color: var(--sub);
+      text-decoration: none;
+    }
+    .dict-src:hover { color: var(--accent); }
+
+    /* 诊断面板里的键值行 */
+    .diag-sec { margin-bottom: 6px; }
+    .diag-sec h4 {
+      font-size: 11px;
+      color: var(--sub);
+      letter-spacing: .5px;
+      margin: 14px 0 4px;
+      text-transform: uppercase;
+    }
+    .diag-sec h4:first-child { margin-top: 0; }
+    .diag-row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.65; }
+    .diag-row > b {
+      flex: 0 0 92px;
+      color: var(--sub);
+      font-weight: 400;
+    }
+    .diag-row > span { flex: 1; min-width: 0; word-break: break-word; }
+    .diag-ok { color: var(--green); }
+    .diag-bad { color: var(--accent); }
 
     /* ===== 四选一题目本体（卡片和演示页共用） ===== */
     .quiz-host { margin-top: 9px; }
@@ -472,6 +641,26 @@
     }
     .deck-count b { color: var(--text); font-size: 15px; }
     .deck-stat b { color: var(--text); }
+    /* 词库小标签：贴在「第 n / N 题」右边，平时就两个字，不占地方 */
+    .dict-chip {
+      margin-left: 6px;
+      padding: 1px 6px 1px 7px;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 16px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--tag-text);
+      cursor: pointer;
+      vertical-align: 1px;
+      white-space: nowrap;
+    }
+    .dict-chip:hover { border-color: var(--tag-text); background: var(--tag); }
+    .dict-chip.open { border-color: var(--tag-text); background: var(--tag); }
+    .dict-chip i { font-style: normal; font-size: 9px; opacity: .6; margin-left: 1px; }
+    .empty-dict { margin-top: 16px; }
+    .empty-dict .dict-chip { margin-left: 0; font-size: 12px; padding: 3px 9px; }
     .deck-bar {
       height: 4px;
       background: var(--border);
@@ -597,24 +786,35 @@
       border-radius: 8px;
       padding: 7px 10px;
     }
+    .vocabulary-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+    .vocabulary-tags > span { font-size: 10px; color: var(--sub); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+    .normal-meaning { margin-top: 18px; font-size: 15px; line-height: 1.7; }
+    .mode-setting { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-size: 12px; }
+    .cap-status { min-height: 18px; height: 18px; overflow: hidden; white-space: nowrap; }
+    .cap-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
   <header>
     <h1><img src="icons/icon48.png" class="logo-img" alt="" />奶娃过四级</h1>
     <div class="video-title" id="videoTitle">尚未捕获视频</div>
+    <div class="cap-status" id="capStatus" data-state="idle">
+      <i></i><span id="capStatusText">等待字幕状态</span>
+    </div>
   </header>
 
   <div class="tabs">
     <div class="tab active" data-tab="current">当前视频</div>
     <div class="tab" data-tab="history">历史记录</div>
     <div class="tab" data-tab="familiar">已斩词</div>
+    <button type="button" class="diag-btn" id="diagBtn" title="诊断信息：卡在哪一步、计时、字幕容器状态" aria-label="诊断信息">ⓘ</button>
   </div>
 
   <!-- 当前视频 tab -->
   <div id="tab-current">
     <div class="toolbar">
       <input type="text" id="searchInput" placeholder="搜索单词或释义..." />
+      <button type="button" class="dict-chip" id="dictChip" title="词库与学习方式">四级 ▾</button>
       <button class="btn btn-primary" id="recaptureBtn">重新抓取</button>
     </div>
     <div class="content" id="currentContent"></div>
@@ -637,6 +837,28 @@
   <div class="detail-panel" id="detailPanel">
     <div class="detail-box" id="detailBox"></div>
   </div>
+
+  <!-- 诊断面板 -->
+  <div class="detail-panel" id="diagPanel">
+    <div class="detail-box">
+      <div class="detail-head">
+        <strong>字幕与弹窗诊断</strong>
+        <button class="detail-close" id="diagClose" aria-label="关闭诊断">✕</button>
+      </div>
+      <div id="diagBody"></div>
+    </div>
+  </div>
+
+  <!-- 词库切换小弹窗（点「四级 ▾」向下弹出） -->
+  <div class="dict-pop" id="dictPop" hidden>
+    <label class="mode-setting">学习方式 <select id="learningModeSelect"><option value="normal">普通模式</option><option value="quiz" selected>测试模式</option></select></label>
+    <div class="dict-pop-head">选择词库（当前视频按词库筛选）</div>
+    <div id="dictList"></div>
+    <div class="dict-pop-sep"></div>
+    <button type="button" class="dict-import" id="dictImportBtn">＋ 导入我的词表（JSON / CSV / TXT）</button>
+    <a href="#" class="dict-src" id="dictSrcLink">词表来源与许可 →</a>
+  </div>
+  <input type="file" id="dictFile" accept=".json,.csv,.tsv,.txt,application/json,text/plain,text/csv" hidden />
 
   <script src="popup.js"></script>
 </body>

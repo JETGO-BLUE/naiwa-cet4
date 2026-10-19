@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "奶娃过四级",
-  "version": "1.5.0",
-  "description": "奶娃陪你过四级：收集视频字幕中的四级词汇（优先读取沉浸式翻译的双语字幕），去重、每个 3 分钟区间记录一个精确出现时间点（可点击跳回视频），卡片式四选一记词——答对自动翻下一题，答错停在原题",
+  "version": "1.6.2",
+  "description": "从视频字幕累积四级、六级、雅思和自定义词汇；支持普通学习、卡片四选一、答题进度保存与时间点回看",
   "minimum_chrome_version": "111",
-  "permissions": ["storage", "activeTab", "tabs"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
   "host_permissions": [
     "http://*/*",
     "https://*/*"
@@ -14,21 +18,36 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://youtube.com/*", "https://*.youtube.com/*"],
-      "js": ["youtube-bridge.js"],
+      "matches": [
+        "https://youtube.com/*",
+        "https://*.youtube.com/*"
+      ],
+      "js": [
+        "youtube-bridge.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["cet4_words.json"],
-      "matches": ["http://*/*", "https://*/*"]
+      "resources": [
+        "cet4_words.json"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
     }
   ],
   "action": {

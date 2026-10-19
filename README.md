@@ -2,11 +2,14 @@
 
 > 看视频的时候，把四级词汇悄悄攒起来。
 
-[![Version](https://img.shields.io/badge/version-1.5.0-c2572a)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.6.0-c2572a)](manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-2f7d52)](LICENSE)
 [![Manifest](https://img.shields.io/badge/manifest-v3-4285f4)](manifest.json)
 
-一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**四级词汇范围内的英文单词**，去重、**每个 3 分钟区间记一个精确出现时间点**（点一下就能跳回视频那一秒），用**卡片式四选一**帮你把词记牢（答对自动跳下一题，可点读发音），还能把已经熟悉的词一键「斩」掉。
+一个 Chrome / Edge 浏览器扩展（Manifest V3）。播放视频时自动从字幕里提取**词表范围内的英文单词**
+（内置四级 / 六级 / 雅思，也可以导入自己的词表），去重、**每个 3 分钟区间记一个精确出现时间点**
+（点一下就能跳回视频那一秒），用**卡片式四选一**帮你把词记牢（答对自动跳下一题，可点读发音），
+还能把已经熟悉的词一键「斩」掉。
 
 <p align="center">
   <img src="icons/icon128.png" width="110" alt="奶娃过四级">
@@ -23,13 +26,19 @@
 
 | 功能 | 说明 |
 |------|------|
-| **自动抓词** | 优先读取「沉浸式翻译」渲染的双语字幕（英文+中文）；没开时通过 MAIN world 桥接抓 YouTube 原生字幕轨 |
+| **自动抓词** | 读取「沉浸式翻译」双语字幕、标准英文字幕轨，并通过 MAIN world 桥接补充 YouTube 原生字幕；全部走增量合并 |
+| **普通 / 测试模式** | 词库按钮内切换；普通模式直接显示释义，测试模式四选一，两种模式共用采集记录和已斩词 |
 | **卡片式答题** | 单词题做成卡片牌堆，**一屏只有一道题**。底部常驻「上一题 / 下一题」按钮左右翻页；键盘 ← → 和鼠标划动也能翻 |
 | **去重 + 精确时间点** | 同一个词只列一次；按 **3 分钟一个区间**记录，但记的是**那一句真正出现的秒数**（如 `3:47`），不是区间开头的整点，最多 10 个。**点一下视频就跳回去**，落点再提前 0.7 秒，免得跳过去字幕已经消失 |
 | **四选一记词** | 不直接给答案：单击单词朗读发音，从 4 个中文释义里选。**选对自动翻到下一题；选错停在原题**、标 ❌ 让你接着选。选项顺序**按单词固定**，不会每开一次就乱跳。**4590 词题库内置，出题不联网** |
 | **基础词过滤** | `a / the / of / be / go` 这类词不进题堆，只在显示层隐藏（原始记录不动，搜索仍能查到） |
+| **三词库 + 自定义** | 四级 4,590 / 六级 2,219 / 雅思 1,000，另可导入 JSON / CSV / TSV / TXT。搜索栏旁的词库按钮始终可用，重叠词显示全部标签 |
+| **进度与实时更新** | 按视频保存答题状态与位置，搜索和切词库不丢隐藏词的进度；弹窗保持打开时也更新新增词卡 |
+| **采集状态条** | 头部一行小字告诉你卡在哪一步：正在连接 / 等待字幕 / 正在收集 N 句 / 读不到字幕 / 抓取出错 |
+| **诊断面板** | `ⓘ` 打开：字幕容器、Shadow DOM、cue 数量、当前记录概况、保存耗时 |
 | **一键「斩」** | 标记为熟悉词后，该词**立刻从当前题堆移除**，越用越清爽 |
 | **点「详解」看详情** | 原型、各词性释义、单词变形（复数/过去式/过去分词/现在分词/比较级/最高级）、同根词 |
+| **删除历史** | 历史记录可以逐条删除，当前看着的那条删掉会同步回到空态 |
 | **双词典兜底** | 本地词表 → Free Dictionary API → Wiktionary，404 也能查到 |
 | **只读不打扰** | 纯只读监听页面字幕元素，不修改任何页面内容，不影响翻译扩展与视频播放 |
 | **跨站点** | 不局限于 YouTube，任何页面上出现字幕（配合沉浸式翻译）都能收集 |
@@ -72,12 +81,20 @@
 ├── content.js             # 页面侧：监听字幕 DOM / Shadow DOM，上报字幕文本
 ├── youtube-bridge.js      # 只跑在 YouTube 的 MAIN world：把播放器里的字幕轨元数据递出来
 ├── popup.html / popup.js  # 弹窗界面：卡片牌堆答题、详情、斩词、历史
-├── cet4_words.json        # 四级词表（约 4590 词）
-├── quiz_bank.json         # 出题题库：每个词的 3 个形近/易混干扰释义（本地生成）
+├── cet4_words.json        # 四级词表（4590 词，带中文释义）
+├── cet6_words.json        # 六级词头（2219 词，CC BY-SA 4.0，源数据无释义）
+├── ielts_words.json       # 雅思/学术词表（1000 词，带英文释义）
+├── vocab_extra_meanings.json  # 非四级词的中文释义（1453 条，让六级/雅思能离线出题）
+├── quiz_bank.json         # 出题题库：每个四级词的 3 个形近/易混干扰释义（本地生成）
+├── vocabulary-sources.json    # 上面几个数据文件的来源、许可、校验值
+├── licenses/              # 第三方数据许可全文（CC BY-SA 4.0 / MIT ×2）
+├── scripts/
+│   └── build-vocab-data.py    # 按固定 commit 重建词库数据（构建期用，运行时不调用）
 ├── icons/                 # 扩展图标 16 / 48 / 128
 ├── docs/
 │   ├── index.html         # GitHub Pages 落地页
 │   ├── privacy.html       # 隐私政策（公开可访问）
+│   ├── vocabulary-sources.html  # 词表与题库来源（署名页）
 │   ├── 使用说明.md / 使用说明.html
 │   ├── logo-300.png       # 页面页头图标
 │   └── screenshots/       # 界面截图
@@ -155,11 +172,15 @@ cd naiwa-cet4
 
 ```bash
 # 打完 tag 推送，GitHub Actions 会自动产出 zip 到 Release
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.6.2
+git push origin v1.6.2
 ```
 
-也可以本地手动打包：把 `manifest.json`、`background.js`、`content.js`、`popup.html`、`popup.js`、`cet4_words.json`、`quiz_bank.json`、`icons/` 压缩成一个 zip（**不要**把 `docs/`、`.github/`、`README.md` 打进去）。
+本地打包先运行 `node scripts/package-extension.js dist/naiwa-cet4`，再压缩生成的目录。脚本按 `scripts/runtime-files.json` 复制并检查全部运行文件，包含 YouTube 桥接、三份词表、补充释义、署名页和许可证；不要沿用旧版的少量文件清单。
+
+本地回归：`node scripts/test-merge-regressions.js`；发布清单：`node scripts/package-extension.js --check`。测试采用内存存储和合成页面，不代表真实 Chrome / Edge 视频验收。修复范围和验收边界见 [合并修复验证](docs/合并修复验证.md)。
+
+可靠识别的 YouTube 视频会按同一 ID 继续累加；其他页面在身份无法确认时按本次连接独立保存，并显示「视频身份未确认」，历史记录仍可查看。切分集或更换媒体来源不会把字幕混进旧记录。
 
 ---
 
@@ -171,7 +192,16 @@ git push origin v1.4.0
 
 ## 许可
 
-[MIT](LICENSE)
+**代码**：[MIT](LICENSE)
+
+**数据**：`cet4_words.json` / `quiz_bank.json` 沿用原项目；`cet6_words.json` 是
+**CC BY-SA 4.0**（OpenEtymology CET6）；`ielts_words.json` 是 MIT（WordLevel）；
+`vocab_extra_meanings.json` 以 ECDICT 为主整理（仓库级 MIT，上游为多来源汇编）。
+
+⚠️ **因为这个仓库带了 CC BY-SA 4.0 的六级词表，它不算「完全的 MIT」** ——
+数据文件各自沿用来源许可，再分发时请把署名带上。
+完整来源、固定 commit、校验值和许可全文见
+[`docs/vocabulary-sources.html`](docs/vocabulary-sources.html) 与 [`licenses/`](licenses/)。
 
 ---
 

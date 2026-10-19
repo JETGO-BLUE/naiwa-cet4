@@ -19,3 +19,25 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---------------------------------------------------------------------------
+数据文件不在此许可范围内 / Data files are NOT covered by this license
+---------------------------------------------------------------------------
+
+上面的 MIT 许可只适用于**代码**。以下数据文件来自第三方公开词表，
+沿用各自来源的许可，详情见 `vocabulary-sources.json` 与 `licenses/`：
+
+  cet4_words.json            项目原有数据（沿用原项目）
+  quiz_bank.json             由 cet4_words.json 离线生成
+  cet6_words.json            OpenEtymology CET6 — CC BY-SA 4.0
+  ielts_words.json           WordLevel TOEFL & IELTS Essential Vocabulary — MIT
+  vocab_extra_meanings.json  以 ECDICT 为主整理（仓库级 MIT；上游为多来源汇编）
+
+其中 **cet6_words.json 使用 CC BY-SA 4.0**，再分发时须遵守署名与相同方式共享的要求
+（许可全文见 `licenses/CC-BY-SA-4.0.txt`）。面向使用者的署名入口：
+`docs/vocabulary-sources.html`。
+
+The MIT license above applies to the **code only**. The bundled word lists come
+from third-party sources and remain under their own licenses — see
+`vocabulary-sources.json` and the `licenses/` directory.
+

@@ -1,0 +1,51 @@
+{
+  "retrieved_on": "2026-10-18",
+  "schema_version": 1,
+  "sources": {
+    "cet6": {
+      "changes": "词头转小写、去重、按字母排序、转为 {词: \"\"} 的 JSON；未新增释义。",
+      "commit": "7d89f3697abf26e305fe2627f181b692c2c10b28",
+      "description": "公开六级词表，仅词头，源数据不带释义。",
+      "license": "CC-BY-SA-4.0",
+      "license_file": "licenses/CC-BY-SA-4.0.txt",
+      "output_count": 2219,
+      "output_file": "cet6_words.json",
+      "output_sha256": "cbaca5db9b833e4e586ad62de86c22516faacacbf1947d2d0ff6d5622040bdc7",
+      "path": "CET6/CET6.txt",
+      "repository": "https://github.com/openetymology/OpenEtymology",
+      "source_sha256": "9a8fa3f2464a39526472211228ef1f331ab1e3d67567b11eea49efc7444d5647",
+      "source_url": "https://raw.githubusercontent.com/openetymology/OpenEtymology/7d89f3697abf26e305fe2627f181b692c2c10b28/CET6/CET6.txt",
+      "title": "OpenEtymology CET6",
+      "upstream_license_note": "licenses/cet6-LICENSE.txt"
+    },
+    "extra_meanings": {
+      "changes": "只取 correct 释义，按 partOfSpeech 补词性前缀；丢掉干扰项与规则说明（省约 660 KB）。",
+      "derived_from": [
+        "ECDICT（中文释义，仓库声明 MIT；其 README 说明为多来源汇编，单词条未保留上游出处）",
+        "Wiktionary（固定修订，少量词条）"
+      ],
+      "description": "四级词表以外、六级/雅思词同表头的中文释义，用来让六级与雅思模式也能离线出中文题。",
+      "license_file": "licenses/ecdict-LICENSE.txt",
+      "output_count": 1453,
+      "output_file": "vocab_extra_meanings.json",
+      "output_sha256": "f5b64947f9b388352faefb2ffe414e3c6754fa6ed25bb1149301231065d22a8d",
+      "provenance_caveat": "ECDICT 为汇编数据，单词条无独立出处；本项目依仓库级 MIT 声明复用，并在此记录该限制。",
+      "title": "非四级词的中文释义（补充）"
+    },
+    "ielts": {
+      "changes": "词头转小写、按字母排序；definition_en 前加词性缩写，保留英文释义，未译成中文。",
+      "commit": "85d4392a2254d2a1ad73cf12cdd8898b49cd3295",
+      "description": "社区整理、含 AI 增补的 TOEFL/IELTS 共用学术词表，非官方雅思词表、非雅思专属。",
+      "license": "MIT",
+      "license_file": "licenses/ielts-LICENSE.txt",
+      "output_count": 1000,
+      "output_file": "ielts_words.json",
+      "output_sha256": "8545c1f19be3ead5503d5509aa39462a6e476e93f1db24eea7ad9a53ba4ceaca",
+      "path": "toefl_essential_vocabulary.json",
+      "repository": "https://github.com/gungorkaya-eng/toefl-essential-vocabulary-dataset",
+      "source_sha256": "1771a0b444f8a3141339c07474336fdf1336d2f966bef3d13a2a8fd64f9ea885",
+      "source_url": "https://raw.githubusercontent.com/gungorkaya-eng/toefl-essential-vocabulary-dataset/85d4392a2254d2a1ad73cf12cdd8898b49cd3295/toefl_essential_vocabulary.json",
+      "title": "WordLevel TOEFL & IELTS Essential Vocabulary"
+    }
+  }
+}
