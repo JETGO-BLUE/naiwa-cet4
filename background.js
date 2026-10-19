@@ -2,21 +2,193 @@
 
 'use strict';
 
-// ============ 1. 四级词表加载 ============
-let CET4 = null;
-async function loadCET4() {
-  if (CET4) return CET4;
+// ============ 1. 词表加载（多词库合并） ============
+// 把四级 / 六级 / 雅思 / 用户导入的词表合并成一张 {词: 释义}，另存一张 {词: [类别]}。
+// 这样后面所有「匹配 / 词形还原 / 出题」都还按原来的写法跑，只是词表变大了。
+let VOCAB = null;       // {词: 释义}
+let VOCAB_CATS = null;  // {词: ['cet4','cet6','ielts','user:xxx']}
+let CAT_COUNTS = null;  // {类别: 词数}
+let USER_DICTS = null;  // {id: {id,name,words,count,importedAt}}
+let vocabLoad = null;
+
+// 内置词库（顺序即释义优先级：四级中文 > 补充中文 > 雅思英文）
+const BUILTIN_DICTS = [
+  { id: 'cet4', label: '四级', file: 'cet4_words.json' },
+  { id: 'cet6', label: '六级', file: 'cet6_words.json' },
+  { id: 'ielts', label: '雅思', file: 'ielts_words.json' },
+];
+const USER_DICTS_KEY = 'userDicts';
+const PROGRESS_KEY = 'quizProgress'; // { [videoId]: {index, anchor, done, wrong} }
+const MAX_USER_DICTS = 5;
+const MAX_USER_DICT_BYTES = 3 * 1024 * 1024;
+const storageLocks = new Map();
+const captureOwners = new Map();
+
+// 同一个存储对象的读、合并、落盘必须在同一条队列中执行。
+function withStorageLock(key, work) {
+  const pending = (storageLocks.get(key) || Promise.resolve()).catch(() => {}).then(work);
+  storageLocks.set(key, pending);
+  pending.finally(() => {
+    if (storageLocks.get(key) === pending) storageLocks.delete(key);
+  }).catch(() => {});
+  return pending;
+}
+
+function parseTimeSeconds(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+  const text = String(value == null ? '' : value).trim();
+  const match = text.match(/^(\d+):(\d{1,2}(?:\.\d+)?)$/);
+  const n = match ? Number(match[1]) * 60 + Number(match[2]) : Number(text);
+  return text && Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+async function fetchJson(file) {
+  const resp = await fetch(chrome.runtime.getURL(file));
+  if (!resp.ok) throw new Error(file + ' 加载失败 ' + resp.status);
+  return resp.json();
+}
+
+async function loadUserDicts() {
+  if (USER_DICTS) return USER_DICTS;
+  const d = await chrome.storage.local.get(USER_DICTS_KEY);
+  USER_DICTS = d[USER_DICTS_KEY] || {};
+  return USER_DICTS;
+}
+
+// 词表变了（导入 / 删除）就把所有缓存清掉，下次用到时重建
+function invalidateVocab() {
+  VOCAB = null;
+  VOCAB_CATS = null;
+  CAT_COUNTS = null;
+  VOCAB_KEYS = null;
+  USER_DICTS = null;
+  vocabLoad = null;
+}
+
+async function loadVocab() {
+  if (VOCAB) return VOCAB;
+  if (vocabLoad) return vocabLoad;
+
+  vocabLoad = (async () => {
+    const vocab = Object.create(null);
+    const cats = Object.create(null);
+    const counts = Object.create(null);
+
+    const pushCat = (w, c) => {
+      if (!cats[w]) cats[w] = [];
+      if (cats[w].indexOf(c) < 0) {
+        cats[w].push(c);
+        counts[c] = (counts[c] || 0) + 1;
+      }
+    };
+    // force=true 才覆盖已有释义（只有四级中文有资格强制）
+    const setMeaning = (w, m, force) => {
+      if (!m) return;
+      if (force || !vocab[w]) vocab[w] = m;
+    };
+
+    // 1) 四级：中文释义，优先级最高
+    try {
+      const cet4 = await fetchJson('cet4_words.json');
+      for (const w of Object.keys(cet4)) {
+        const k = w.toLowerCase();
+        setMeaning(k, cet4[w], true);
+        pushCat(k, 'cet4');
+      }
+    } catch (e) {
+      console.error('[YT-CET4] 四级词表加载失败', e);
+    }
+
+    // 2) 补充中文释义：四级以外那些词的中文（让六级/雅思能离线出中文题）
+    try {
+      const extra = await fetchJson('vocab_extra_meanings.json');
+      for (const w of Object.keys(extra)) setMeaning(w.toLowerCase(), extra[w], false);
+    } catch (e) {
+      /* 没有也能跑，只是六级/雅思会用英文释义 */
+    }
+
+    // 3) 六级：源数据只有词头，这里只提供「属于六级」这个事实
+    try {
+      const cet6 = await fetchJson('cet6_words.json');
+      for (const w of Object.keys(cet6)) pushCat(w.toLowerCase(), 'cet6');
+    } catch (e) {
+      /* noop */
+    }
+
+    // 4) 雅思：英文释义作为兜底（已经有中文就不覆盖）
+    try {
+      const ielts = await fetchJson('ielts_words.json');
+      for (const w of Object.keys(ielts)) {
+        const k = w.toLowerCase();
+        setMeaning(k, ielts[w], false);
+        pushCat(k, 'ielts');
+      }
+    } catch (e) {
+      /* noop */
+    }
+
+    // 5) 用户导入的词表：**以用户自己的释义为准**（force=true），
+    //    因为是用户主动导入的，被内置释义盖掉会让人以为没导进来
+    const users = await loadUserDicts();
+    for (const id of Object.keys(users)) {
+      const words = (users[id] && users[id].words) || {};
+      for (const w of Object.keys(words)) {
+        const k = w.toLowerCase();
+        setMeaning(k, String(words[w] || '').slice(0, 200), true);
+        pushCat(k, 'user:' + id);
+      }
+      counts['user:' + id] = Object.keys(words).length;
+    }
+
+    VOCAB = vocab;
+    VOCAB_CATS = cats;
+    CAT_COUNTS = counts;
+    console.log(
+      '[YT-CET4] 词表加载完成：合并 ' +
+        Object.keys(vocab).length +
+        ' 词（四级 ' + (counts.cet4 || 0) +
+        ' / 六级 ' + (counts.cet6 || 0) +
+        ' / 雅思 ' + (counts.ielts || 0) + '）'
+    );
+    return VOCAB;
+  })();
+
   try {
-    const url = chrome.runtime.getURL('cet4_words.json');
-    const resp = await fetch(url);
-    CET4 = await resp.json();
-    console.log('[YT-CET4] 四级词表加载完成，共', Object.keys(CET4).length, '词');
-    return CET4;
+    return await vocabLoad;
   } catch (e) {
     console.error('[YT-CET4] 词表加载失败', e);
-    CET4 = {};
-    return CET4;
+    VOCAB = VOCAB || Object.create(null);
+    VOCAB_CATS = VOCAB_CATS || Object.create(null);
+    return VOCAB;
   }
+}
+
+// 当前选中的词库（存在本地，默认四级）
+async function getSelectedDict() {
+  const d = await chrome.storage.local.get(['selectedDict', 'selectedVocabulary']);
+  const sel = String(d.selectedDict || d.selectedVocabulary || 'cet4');
+  if (sel.indexOf('user:') === 0) {
+    const users = await loadUserDicts();
+    return users[sel.slice(5)] ? sel : 'cet4';
+  }
+  return BUILTIN_DICTS.some((m) => m.id === sel) ? sel : 'cet4';
+}
+
+// 给记录里的词补上「属于哪些词库」和缺失的释义。
+// 这样旧记录不用重抓也能在六级/雅思模式下显示重叠的那部分词。
+function decorateRecord(record) {
+  if (!record || !Array.isArray(record.words) || !VOCAB_CATS) return record;
+  for (const w of record.words) {
+    if (!w || !w.word) continue;
+    const key = String(w.word).toLowerCase();
+    const lemmaKey = w.lemma ? String(w.lemma).toLowerCase() : key;
+    w.cats = VOCAB_CATS[lemmaKey] || VOCAB_CATS[key] || [];
+    w.categories = w.cats;
+    // 只更新返回界面的投影，旧卡也按当前词库（包括用户释义）显示。
+    const meaning = VOCAB && (VOCAB[lemmaKey] || VOCAB[key]);
+    if (meaning) w.meaning = meaning;
+  }
+  return record;
 }
 
 // ============ 2. 词形还原（强化版） ============
@@ -67,31 +239,31 @@ function lemmatize(word) {
   const L = w.length;
 
   // 优先用词表验证：如果原词就在词表，直接返回
-  if (CET4 && CET4[w]) return w;
+  if (VOCAB && VOCAB[w]) return w;
 
   // -ies -> -y （studies -> study）
   if (L > 4 && w.endsWith('ies')) {
     const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
+    if (VOCAB && VOCAB[cand]) return cand;
     return cand;
   }
   // -es：分两种情况
   if (L > 3 && w.endsWith('es')) {
     const base = w.slice(0, -2); // 去掉 es
     // 先试 "去 es" 后的形式（boxes -> box）
-    if (CET4 && CET4[base]) return base;
+    if (VOCAB && VOCAB[base]) return base;
     // 再试 "去 s"（makes -> make，其实是 make 的 s）
     const base2 = w.slice(0, -1); // 去掉 s
-    if (CET4 && CET4[base2]) return base2;
+    if (VOCAB && VOCAB[base2]) return base2;
     // 补 e（makes -> make）
     const baseE = base + 'e';
-    if (CET4 && CET4[baseE]) return baseE;
+    if (VOCAB && VOCAB[baseE]) return baseE;
     return base;
   }
   // -s -> 去掉（复数/三单）
   if (L > 3 && w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && !w.endsWith('is') && !w.endsWith('ous')) {
     const cand = w.slice(0, -1);
-    if (CET4 && CET4[cand]) return cand;
+    if (VOCAB && VOCAB[cand]) return cand;
     return cand;
   }
   // -ing
@@ -102,14 +274,14 @@ function lemmatize(word) {
     }
     const candidates = [stem, stem + 'e'];
     for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
+      if (VOCAB && VOCAB[c]) return c;
     }
     return stem;
   }
   // -ied -> -y （studied -> study）
   if (L > 4 && w.endsWith('ied')) {
     const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
+    if (VOCAB && VOCAB[cand]) return cand;
     return cand;
   }
   // -ed
@@ -120,32 +292,32 @@ function lemmatize(word) {
     }
     const candidates = [stem, stem + 'e'];
     for (const c of candidates) {
-      if (CET4 && CET4[c]) return c;
+      if (VOCAB && VOCAB[c]) return c;
     }
     return stem;
   }
   // -er 比较级（happier -> happy, bigger -> big）
   if (L > 4 && w.endsWith('er') && w.endsWith('ier') === false) {
     const base = w.slice(0, -2);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
+    if (VOCAB && VOCAB[base]) return base;
+    if (VOCAB && VOCAB[base + 'e']) return base + 'e';
   }
   // -ier -> -y（happier -> happy）
   if (L > 4 && w.endsWith('ier')) {
     const cand = w.slice(0, -3) + 'y';
-    if (CET4 && CET4[cand]) return cand;
+    if (VOCAB && VOCAB[cand]) return cand;
     return cand;
   }
   // 双写+er（bigger -> big）
   if (L > 5 && w.endsWith('er') && w[w.length-3] === w[w.length-4]) {
     const cand = w.slice(0, -3);
-    if (CET4 && CET4[cand]) return cand;
+    if (VOCAB && VOCAB[cand]) return cand;
   }
   // -est 最高级
   if (L > 5 && w.endsWith('est')) {
     const base = w.slice(0, -3);
-    if (CET4 && CET4[base]) return base;
-    if (CET4 && CET4[base + 'e']) return base + 'e';
+    if (VOCAB && VOCAB[base]) return base;
+    if (VOCAB && VOCAB[base + 'e']) return base + 'e';
     if (base.endsWith('i')) return base.slice(0, -1) + 'y'; // happiest -> happy
   }
   return w;
@@ -153,25 +325,33 @@ function lemmatize(word) {
 
 // ============ 3. 四级词匹配（返回原词 + 匹配到的四级词根） ============
 // 匹配：先直接命中，再还原后命中。返回 { surface: 原词, lemma: 词根, meaning }
-function matchCET4(word, cet4Map) {
+function matchWord(word, vocabMap) {
   const w = word.toLowerCase();
-  if (cet4Map[w]) return { surface: w, lemma: w, meaning: cet4Map[w] };
+  const catsOf = (k) => (VOCAB_CATS && VOCAB_CATS[k]) || [];
+  if (vocabMap[w]) return { surface: w, lemma: w, meaning: vocabMap[w], cats: catsOf(w) };
   const lemma = lemmatize(w);
-  if (lemma !== w && cet4Map[lemma]) {
-    return { surface: w, lemma: lemma, meaning: cet4Map[lemma] };
+  if (lemma !== w && vocabMap[lemma]) {
+    return { surface: w, lemma: lemma, meaning: vocabMap[lemma], cats: catsOf(lemma) };
   }
   return null;
 }
 
 // 从一条字幕提取四级词，返回原样 surface 词
-function extractCET4Words(text, cet4Map) {
+function extractWords(text, vocabMap) {
   const found = new Set();
-  const tokens = text.toLowerCase().split(/[^a-z']+/).filter(Boolean);
+  const normalized = text.toLowerCase().replace(/inasmuch\s+as/g, 'inasmuchas').replace(/’/g, "'");
+  const tokens = normalized.split(/[^a-z'-]+/).filter(Boolean);
   for (const tok of tokens) {
     const clean = tok.replace(/^'+|'+$/g, '');
     if (clean.length < 2) continue;
-    const m = matchCET4(clean, cet4Map);
+    const m = matchWord(clean, vocabMap);
     if (m) found.add(m.surface); // 保留字幕原样
+    else if (clean.includes('-')) {
+      for (const part of clean.split('-').filter(Boolean)) {
+        const match = matchWord(part, vocabMap);
+        if (match) found.add(match.surface);
+      }
+    }
   }
   return Array.from(found);
 }
@@ -187,22 +367,23 @@ function round1(sec) {
 const MAX_TIMES = 10;        // 每个词最多保留 10 个时间点
 const TIME_BUCKET_SEC = 180; // 时间点按「每 3 分钟」记录一次（3*60 秒一个区）
 
-async function processCaptions(msg) {
-  const cet4Map = await loadCET4();
-  const { videoId, title, cues } = msg;
-
-  const wordMap = new Map(); // surface -> { meaning, lemma, buckets: Map<区号, 精确秒> }
+// 把一批 cues 分词/词形还原/分桶，产出 surface -> { word, lemma, meaning, cats, times[] }
+// times 已经是「每 3 分钟区取最早、按区排序、最多 10 个」的数值秒。
+// 全量重建和增量合并都复用它，保证两种路径算出来的结果一模一样。
+function buildWordEntries(cues, vocabMap) {
+  const wordMap = new Map(); // surface -> { meaning, lemma, cats, buckets: Map<区号, 精确秒> }
 
   for (const cue of cues) {
-    const words = extractCET4Words(cue.text, cet4Map);
+    const words = extractWords(cue.text, vocabMap);
     const bucket = Math.floor(cue.start / TIME_BUCKET_SEC); // 落在第几个 3 分钟区
     const at = round1(cue.start);                           // 这一句的精确起始秒
     for (const surface of words) {
-      const m = matchCET4(surface, cet4Map);
+      const m = matchWord(surface, vocabMap);
       if (!wordMap.has(surface)) {
         wordMap.set(surface, {
           meaning: m ? m.meaning : '',
           lemma: m ? m.lemma : surface,
+          cats: m ? m.cats : [],
           buckets: new Map(),
         });
       }
@@ -213,34 +394,105 @@ async function processCaptions(msg) {
     }
   }
 
-  const result = [];
+  const entries = new Map();
   for (const [word, data] of wordMap) {
     const bucketIds = Array.from(data.buckets.keys()).sort((a, b) => a - b);
-    result.push({
+    entries.set(word, {
       word: word,          // 字幕原样
       lemma: data.lemma,   // 还原词根
       meaning: data.meaning,
+      cats: data.cats,     // 命中哪些词库（四级/六级/雅思/自定义）
       // 每 3 分钟区一个时间点，记的是区内**精确出现时间**（如 3:47），最多 10 个
       // 存数值秒（number），popup 负责格式化成 "3:47" 并支持点击跳转
       times: bucketIds.slice(0, MAX_TIMES).map((b) => data.buckets.get(b)),
     });
   }
+  return entries;
+}
 
-  result.sort((a, b) => b.times.length - a.times.length);
+// 把已经存好的 times[]（数值秒）反推回「区号 -> 最早时间」，供增量合并用。
+// 注意：如果某句字幕正好落在 3 分钟边界 ±0.05s 内，round1 可能把它推到相邻区，
+// 反推会差一个区 —— 影响微乎其微（只对边界±50ms 的字幕），不值得为此改存储格式。
+function timesToBuckets(times) {
+  const m = new Map();
+  for (const t of times || []) {
+    const n = parseTimeSeconds(t);
+    if (n == null) continue;
+    const b = Math.floor(n / TIME_BUCKET_SEC);
+    if (!m.has(b) || n < m.get(b)) m.set(b, n);
+  }
+  return m;
+}
+
+function bucketsToTimes(bm) {
+  return Array.from(bm.entries())
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, MAX_TIMES)
+    .map((e) => e[1]);
+}
+
+async function processCaptions(msg) {
+  // 整轨和重新抓取也只能追加，不能用本次字幕覆盖历史。
+  return ingestDelta(msg);
+}
+
+// 增量采集：把「新句子」合并进已有记录，而不是每次全量重建。
+// 合并按 (3分钟区, 时间) 取最早 —— **天然幂等**：同一条句子被重复发过来，
+// 产生的还是同一个时间点；content 直到落盘确认前都保留原事件，以便重试。
+async function ingestDelta(msg) {
+  const vocabMap = await loadVocab();
+  const { videoId, title, cues } = msg;
+  if (!/^[\w-]{1,128}$/.test(String(videoId || '')) || !Array.isArray(cues) || cues.length > 20000) {
+    throw new Error('视频 ID 或字幕数据无效');
+  }
+
+  const validCues = cues.filter((cue) => cue && typeof cue.text === 'string' &&
+    Number.isFinite(Number(cue.start)) && Number(cue.start) >= 0);
+  const delta = buildWordEntries(validCues, vocabMap);
 
   const key = 'video_' + videoId;
+  const data = await chrome.storage.local.get([key, 'lastVideoId']);
+  const prev = data[key] || null;
+
+  const byWord = new Map();
+  if (prev && Array.isArray(prev.words)) {
+    for (const w of prev.words) if (w && w.word) byWord.set(w.word, w);
+  }
+
+  for (const [surface, entry] of delta) {
+    const existing = byWord.get(surface);
+    if (existing) {
+      const bm = timesToBuckets(existing.times);
+      for (const t of entry.times) {
+        const b = Math.floor(Number(t) / TIME_BUCKET_SEC);
+        if (!bm.has(b) || t < bm.get(b)) bm.set(b, t);
+      }
+      existing.times = bucketsToTimes(bm);
+      if (!existing.meaning) existing.meaning = entry.meaning;
+      if (!existing.cats || !existing.cats.length) existing.cats = entry.cats;
+      if (!existing.lemma || existing.lemma === surface) existing.lemma = entry.lemma;
+    } else {
+      byWord.set(surface, entry);
+    }
+  }
+
+  const words = Array.from(byWord.values());
+  words.sort((a, b) => (b.times ? b.times.length : 0) - (a.times ? a.times.length : 0));
+
   const record = {
+    ...(prev || {}),
     videoId: videoId,
-    title: title,
-    words: result,
-    totalWords: result.length,
-    capturedAt: Date.now(),
-    source: msg.source || 'unknown',
+    title: title || (prev && prev.title) || '',
+    words: words,
+    totalWords: words.length,
+    capturedAt: prev && prev.capturedAt ? prev.capturedAt : Date.now(),
+    source: msg.source || (prev && prev.source) || 'immersive-translate',
+    identityConfirmed: msg.identityConfirmed == null ? (prev ? prev.identityConfirmed : false) : !!msg.identityConfirmed,
+    updatedAt: Date.now(),
   };
 
-  chrome.storage.local.set({ [key]: record });
-  chrome.storage.local.set({ lastVideoId: videoId });
-  return record;
+  await chrome.storage.local.set({ [key]: record, lastVideoId: videoId });
+  return decorateRecord(record);
 }
 
 // ============ 5. 词形变化生成器（本地，秒出，不联网） ============
@@ -510,7 +762,7 @@ async function lookupWordOnline(word) {
 }
 
 // 找词表内的同根词（共享词根，且存在于四级词表中）
-function findCognates(lemma, cet4Map) {
+function findCognates(lemma, vocabMap) {
   const results = new Set();
   const root = lemma.length > 5 ? lemma.slice(0, 5) : lemma;
   // 用前 4~6 个字母做词根前缀匹配，控制误报
@@ -518,7 +770,7 @@ function findCognates(lemma, cet4Map) {
   for (let n = Math.min(6, lemma.length); n >= 3; n--) {
     prefixes.push(lemma.slice(0, n));
   }
-  for (const key of Object.keys(cet4Map)) {
+  for (const key of Object.keys(vocabMap)) {
     if (key === lemma) continue;
     for (const p of prefixes) {
       if (key.startsWith(p) && Math.abs(key.length - lemma.length) <= 6) {
@@ -550,10 +802,10 @@ async function loadQuiz() {
   }
 }
 
-let CET4_KEYS = null;
-function cet4Keys(cet4Map) {
-  if (!CET4_KEYS) CET4_KEYS = Object.keys(cet4Map);
-  return CET4_KEYS;
+let VOCAB_KEYS = null;
+function vocabKeys(vocabMap) {
+  if (!VOCAB_KEYS) VOCAB_KEYS = Object.keys(vocabMap);
+  return VOCAB_KEYS;
 }
 
 // 确定性打乱：同一个词每次生成的选项顺序都一样。
@@ -578,15 +830,15 @@ function seededShuffle(values, seedText) {
 }
 
 // 给一个词生成单选题：正确的四级释义 1 个 + 形近/易混干扰释义 3 个，打乱顺序
-function buildQuiz(word, cet4Map, bank) {
+function buildQuiz(word, vocabMap, bank) {
   const w = String(word || '').toLowerCase();
   const lemma = lemmatize(w);
   let base;
-  if (cet4Map[w]) base = w;
-  else if (cet4Map[lemma]) base = lemma;
+  if (vocabMap[w]) base = w;
+  else if (vocabMap[lemma]) base = lemma;
   else return null;
 
-  const correct = trimMeaning(cet4Map[base], 2) || cet4Map[base];
+  const correct = trimMeaning(vocabMap[base], 2) || vocabMap[base];
   const opts = [];
   const seen = new Set([correct]);
 
@@ -594,7 +846,7 @@ function buildQuiz(word, cet4Map, bank) {
   const ds = (bank && (bank[base] || bank[w])) || [];
   for (const d of ds) {
     if (opts.length >= 3) break;
-    const dm = cet4Map[d];
+    const dm = vocabMap[d];
     if (!dm) continue;
     const t = trimMeaning(dm, 2) || dm;
     if (seen.has(t)) continue;
@@ -604,11 +856,11 @@ function buildQuiz(word, cet4Map, bank) {
 
   // 2) 兜底：题库缺失或不足时，现场从词表按「首字母相同 → 长度相同」补
   const fill = (pred) => {
-    for (const k of cet4Keys(cet4Map)) {
+    for (const k of vocabKeys(vocabMap)) {
       if (opts.length >= 3) return;
       if (k === base || k === w) continue;
       if (pred && !pred(k)) continue;
-      const t = trimMeaning(cet4Map[k], 2) || cet4Map[k];
+      const t = trimMeaning(vocabMap[k], 2) || vocabMap[k];
       if (!t || seen.has(t)) continue;
       seen.add(t);
       opts.push(t);
@@ -678,8 +930,12 @@ function parseJson3Cues(data) {
 async function fetchYoutubeCaptionCues(trackUrl, expectedVideoId) {
   if (!YT_URL_RE.test(trackUrl)) throw new Error('字幕地址不在 YouTube 域名内');
   if (!/^[\w-]{6,32}$/.test(String(expectedVideoId || ''))) throw new Error('视频 ID 无效');
-  const url = trackUrl + (trackUrl.indexOf('?') === -1 ? '?' : '&') + 'fmt=json3';
-  const resp = await fetch(url, { credentials: 'omit' });
+  const url = new URL(trackUrl);
+  if (url.pathname !== '/api/timedtext' || url.searchParams.get('v') !== expectedVideoId) {
+    throw new Error('字幕轨与当前视频不匹配');
+  }
+  url.searchParams.set('fmt', 'json3');
+  const resp = await fetch(url.toString(), { credentials: 'omit' });
   if (!resp.ok) throw new Error('字幕请求失败 ' + resp.status);
   const cues = parseJson3Cues(await resp.json());
   if (cues.length === 0) throw new Error('字幕轨里没有可读文本');
@@ -689,12 +945,37 @@ async function fetchYoutubeCaptionCues(trackUrl, expectedVideoId) {
 // ============ 8. 消息路由 ============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
+  if (sender.tab && (msg.type === 'CAPTURE_STATUS' ||
+      (!captureOwners.has(sender.tab.id) && ['CAPTIONS', 'CAPTIONS_DELTA'].includes(msg.type)))) {
+    captureOwners.set(sender.tab.id, msg.videoId);
+  }
 
-  (async () => {
+  const run = async () => {
     switch (msg.type) {
       case 'CAPTIONS': {
         const rec = await processCaptions(msg);
+        sendResponse({ ok: true, record: decorateRecord(rec) });
+        break;
+      }
+
+      // 增量：content 只发新句子，这里合并进已有记录（幂等，重复发不产生重复点）
+      case 'CAPTIONS_DELTA': {
+        const events = Array.isArray(msg.events) ? msg.events : [];
+        const cues = Array.isArray(msg.cues) ? msg.cues : events.map((event) => event.cue);
+        const rec = await ingestDelta({ ...msg, cues });
+        if (sender.tab && events.length && chrome.tabs) {
+          chrome.tabs.sendMessage(sender.tab.id, {
+            type: 'PERSISTED', recordId: msg.videoId, sessionId: msg.sessionId,
+            eventIds: events.map((event) => event.eventId),
+          }, () => void chrome.runtime.lastError);
+        }
         sendResponse({ ok: true, record: rec });
+        break;
+      }
+
+      case 'PERF_SAMPLE':
+      case 'RETRY_SAVE': {
+        sendResponse({ ok: true });
         break;
       }
 
@@ -726,6 +1007,228 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
+      // 采集状态：content script 上报，popup 读出来显示成一行状态
+      case 'CAPTURE_STATUS': {
+        const st = {
+          videoId: String(msg.videoId || '').slice(0, 128),
+          identityConfirmed: msg.identityConfirmed !== false,
+          tabId: sender.tab ? sender.tab.id : null,
+          title: String(msg.title || '').slice(0, 300),
+          status: String(msg.status || 'waiting').slice(0, 24),
+          detail: String(msg.detail || '').slice(0, 200),
+          cueCount: Math.max(0, Number(msg.cueCount) || 0),
+          saved: !!msg.saved,
+          roundTripMs:
+            msg.roundTripMs != null && Number.isFinite(Number(msg.roundTripMs))
+              ? Math.round(Number(msg.roundTripMs))
+              : null,
+          at: Date.now(),
+        };
+        const values = { captureStatus: st };
+        if (st.tabId != null) values['captureStatus_' + st.tabId] = st;
+        await chrome.storage.local.set(values);
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case 'GET_CAPTURE_STATUS': {
+        const key = msg.tabId == null ? 'captureStatus' : 'captureStatus_' + msg.tabId;
+        const d = await chrome.storage.local.get(key);
+        sendResponse({ ok: true, status: d[key] || null });
+        break;
+      }
+
+      // ---- 词库：列表 / 切换 / 导入 / 删除 ----
+      case 'GET_VOCABULARIES': {
+        await loadVocab();
+        const users = await loadUserDicts();
+        const selected = await getSelectedDict();
+        const dicts = BUILTIN_DICTS.map((m) => ({
+          id: m.id,
+          label: m.label,
+          kind: 'builtin',
+          count: (CAT_COUNTS && CAT_COUNTS[m.id]) || 0,
+        }));
+        for (const id of Object.keys(users)) {
+          dicts.push({
+            id: 'user:' + id,
+            label: String((users[id] && users[id].name) || '自定义'),
+            kind: 'user',
+            count: (CAT_COUNTS && CAT_COUNTS['user:' + id]) || 0,
+          });
+        }
+        sendResponse({ ok: true, selected: selected, dicts: dicts });
+        break;
+      }
+
+      case 'SET_VOCABULARY': {
+        const id = String(msg.dictId || '');
+        await loadVocab();
+        const users = await loadUserDicts();
+        const exists =
+          BUILTIN_DICTS.some((m) => m.id === id) ||
+          (id.indexOf('user:') === 0 && !!users[id.slice(5)]);
+        if (!exists) {
+          sendResponse({ ok: false, error: '词库不存在' });
+          break;
+        }
+        await chrome.storage.local.set({ selectedDict: id });
+        sendResponse({ ok: true, selected: id });
+        break;
+      }
+
+      // 导入用户词表：popup 解析好 {词: 释义} 再发过来，这里只负责清洗和存
+      case 'IMPORT_DICT': {
+        await loadVocab();
+        const raw = msg.words;
+        if (!raw || typeof raw !== 'object') {
+          sendResponse({ ok: false, error: '词表数据无效' });
+          break;
+        }
+        const clean = Object.create(null);
+        let skipped = 0;
+        for (const k of Object.keys(raw)) {
+          const w = String(k).trim().toLowerCase();
+          const m = String(raw[k] == null ? '' : raw[k]).trim();
+          if (!/^[a-z][a-z'’-]{0,40}$/.test(w) || !m) {
+            skipped++;
+            continue;
+          }
+          clean[w] = m.slice(0, 200);
+        }
+        const count = Object.keys(clean).length;
+        if (count === 0) {
+          sendResponse({ ok: false, error: '没有解析出有效词条（需要「英文单词 + 释义」）' });
+          break;
+        }
+        if (count > 5000) {
+          sendResponse({ ok: false, error: '单次最多 5000 条，这次有 ' + count + ' 条' });
+          break;
+        }
+
+        const users = await loadUserDicts();
+        if (Object.keys(users).length >= MAX_USER_DICTS) {
+          sendResponse({ ok: false, error: '最多同时保留 ' + MAX_USER_DICTS + ' 个自定义词表，先删一个再导入' });
+          break;
+        }
+        const id = 'u' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+        const name =
+          String(msg.name || '').trim().slice(0, 40) || '我的词表 ' + (Object.keys(users).length + 1);
+        const next = Object.assign({}, users, {
+          [id]: { id: id, name: name, words: clean, count: count, importedAt: Date.now() },
+        });
+        const bytes = JSON.stringify(next).length;
+        if (bytes > MAX_USER_DICT_BYTES) {
+          sendResponse({
+            ok: false,
+            error: '词表太大（约 ' + Math.round(bytes / 1024) + ' KB，上限约 3 MB），请精简后再导入',
+          });
+          break;
+        }
+        try {
+          await chrome.storage.local.set({ [USER_DICTS_KEY]: next });
+        } catch (e) {
+          sendResponse({ ok: false, error: '保存失败，浏览器本地存储可能已满' });
+          break;
+        }
+        invalidateVocab();
+        sendResponse({
+          ok: true,
+          dict: { id: 'user:' + id, label: name, count: count, skipped: skipped },
+        });
+        break;
+      }
+
+      case 'DELETE_DICT': {
+        await loadVocab();
+        const id = String(msg.id || '').replace(/^user:/, '');
+        const users = await loadUserDicts();
+        if (!users[id]) {
+          sendResponse({ ok: false, error: '词表不存在' });
+          break;
+        }
+        // 必须在删除前判断「当前选中的是不是它」，删完就查不出来了
+        const selectedBefore = await getSelectedDict();
+        const next = Object.assign({}, users);
+        delete next[id];
+        await chrome.storage.local.set({ [USER_DICTS_KEY]: next });
+        invalidateVocab();
+        if (selectedBefore === 'user:' + id) {
+          await chrome.storage.local.set({ selectedDict: 'cet4' });
+        }
+        sendResponse({ ok: true });
+        break;
+      }
+
+      // ---- 做题进度（每个视频一份：做到第几个 + 哪些答对/答错过） ----
+      case 'GET_PROGRESS': {
+        const videoId = String(msg.videoId || '');
+        if (!videoId) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        const d = await chrome.storage.local.get(PROGRESS_KEY);
+        const all = d[PROGRESS_KEY] || {};
+        sendResponse({ ok: true, progress: all[videoId] || null });
+        break;
+      }
+
+      case 'SAVE_PROGRESS': {
+        const videoId = String(msg.videoId || '');
+        if (!/^[\w-]{1,128}$/.test(videoId)) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        const done = {};
+        const wrong = {};
+        if (msg.done && typeof msg.done === 'object') {
+          for (const k of Object.keys(msg.done)) {
+            if (msg.done[k]) done[String(k).slice(0, 40)] = true; // 只收 truthy，防脏数据
+          }
+        }
+        if (msg.wrong && typeof msg.wrong === 'object') {
+          for (const k of Object.keys(msg.wrong)) {
+            const arr = msg.wrong[k];
+            if (Array.isArray(arr)) {
+              wrong[String(k).slice(0, 40)] = arr
+                .filter((n) => Number.isInteger(n) && n >= 0 && n < 4)
+                .slice(0, 4);
+            }
+          }
+        }
+        // 尺寸保护：一个视频的进度不该大到离谱
+        if (Object.keys(done).length > 5000 || Object.keys(wrong).length > 5000) {
+          sendResponse({ ok: false, error: '进度数据过大' });
+          break;
+        }
+        const index = Number.isFinite(Number(msg.index)) ? Math.max(0, Math.floor(Number(msg.index))) : 0;
+        const anchor = String(msg.anchor || '').slice(0, 40);
+
+        const d = await chrome.storage.local.get(PROGRESS_KEY);
+        const all = d[PROGRESS_KEY] || {};
+        const prev = all[videoId] || {};
+        const signatures = { ...(prev.signatures || {}) };
+        const mergedDone = { ...(prev.done || {}) };
+        const mergedWrong = { ...(prev.wrong || {}) };
+        const reset = new Set(Array.isArray(msg.resetWords) ? msg.resetWords : []);
+        for (const [word, signature] of Object.entries(msg.signatures || {})) {
+          if (signatures[word] && signatures[word] !== signature) reset.add(word);
+          signatures[word] = String(signature).slice(0, 40);
+        }
+        for (const word of reset) {
+          delete mergedDone[word];
+          delete mergedWrong[word];
+        }
+        Object.assign(mergedDone, done);
+        for (const word of Object.keys(wrong)) {
+          mergedWrong[word] = Array.from(new Set([...(mergedWrong[word] || []), ...wrong[word]]));
+        }
+        all[videoId] = { index, anchor, done: mergedDone, wrong: mergedWrong, signatures, at: Date.now() };
+        await chrome.storage.local.set({ [PROGRESS_KEY]: all });
+        sendResponse({ ok: true });
+        break;
+      }
+
       case 'GET_STATUS': {
         const d = await chrome.storage.local.get('lastStatus');
         sendResponse({ ok: true, status: d.lastStatus || null });
@@ -734,18 +1237,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // 本地数据（秒出）：原型、四级释义（精简）、单词变形、同根词
       case 'LOOKUP_LOCAL': {
-        const cet4Map = await loadCET4();
+        const vocabMap = await loadVocab();
         const word = (msg.word || '').toLowerCase();
         const lemma = lemmatize(word);
-        const base = lemma !== word && cet4Map[lemma] ? lemma : (cet4Map[word] ? word : lemma);
-        const rawMeaning = cet4Map[base] || '';
-        const cognates = findCognates(base, cet4Map);
+        const base = lemma !== word && vocabMap[lemma] ? lemma : (vocabMap[word] ? word : lemma);
+        const rawMeaning = vocabMap[base] || '';
+        const cognates = findCognates(base, vocabMap);
         sendResponse({
           ok: true,
           surface: word,
           lemma: lemma !== word ? lemma : null,
           base: base,
           cet4Meaning: trimMeaning(rawMeaning, 2),   // 精简：每词性最多 2 个常用释义
+          cats: (VOCAB_CATS && VOCAB_CATS[base]) || [],
           inflections: inflect(base, rawMeaning),    // 单词变形（本地算，秒出）
           cognates: cognates,
         });
@@ -762,12 +1266,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // 出题（本地题库）：给一批词各出 4 个中文释义选项
       case 'GET_QUIZ_BATCH': {
-        const cet4Map = await loadCET4();
+        const vocabMap = await loadVocab();
         const bank = await loadQuiz();
         const list = Array.isArray(msg.words) ? msg.words : [];
         const quizzes = {};
         for (const w of list) {
-          const q = buildQuiz(w, cet4Map, bank);
+          const q = buildQuiz(w, vocabMap, bank);
           if (q) quizzes[w] = q;
         }
         sendResponse({ ok: true, quizzes: quizzes });
@@ -775,14 +1279,44 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       case 'GET_VIDEO': {
+        await loadVocab();
         const videoId = msg.videoId;
         const key = 'video_' + videoId;
         const data = await chrome.storage.local.get([key, 'familiarWords']);
-        sendResponse({ ok: true, record: data[key] || null, familiar: data.familiarWords || [] });
+        sendResponse({ ok: true, record: decorateRecord(data[key] || null), familiar: data.familiarWords || [] });
+        break;
+      }
+
+      // 删除一条历史记录：只删「这条视频收集到的词」，不动已斩词
+      case 'DELETE_VIDEO': {
+        const videoId = String(msg.videoId || '');
+        if (Array.from(captureOwners.values()).includes(videoId)) {
+          sendResponse({ ok: false, error: '视频仍在采集，请先关闭或切换视频页面' });
+          break;
+        }
+        if (!/^[\w-]{1,128}$/.test(videoId)) {
+          sendResponse({ ok: false, error: '视频 ID 无效' });
+          break;
+        }
+        await chrome.storage.local.remove('video_' + videoId);
+        // 同步删掉它的做题进度，避免留一份孤儿进度
+        await withStorageLock(PROGRESS_KEY, async () => {
+          const pd = await chrome.storage.local.get(PROGRESS_KEY);
+          const pall = pd[PROGRESS_KEY] || {};
+          if (pall[videoId]) {
+            delete pall[videoId];
+            await chrome.storage.local.set({ [PROGRESS_KEY]: pall });
+          }
+        });
+        // 如果它正好是"上次打开的"，一并清掉指针，否则 popup 会一直去捞一个不存在的记录
+        const d = await chrome.storage.local.get('lastVideoId');
+        if (d.lastVideoId === videoId) await chrome.storage.local.remove('lastVideoId');
+        sendResponse({ ok: true, videoId: videoId });
         break;
       }
 
       case 'GET_LAST_VIDEO': {
+        await loadVocab();
         const data = await chrome.storage.local.get(['lastVideoId', 'familiarWords']);
         const lastId = data.lastVideoId;
         let record = null;
@@ -790,7 +1324,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const d2 = await chrome.storage.local.get('video_' + lastId);
           record = d2['video_' + lastId] || null;
         }
-        sendResponse({ ok: true, record: record, familiar: data.familiarWords || [], lastVideoId: lastId });
+        sendResponse({ ok: true, record: decorateRecord(record), familiar: data.familiarWords || [], lastVideoId: lastId });
         break;
       }
 
@@ -819,10 +1353,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       case 'GET_ALL_VIDEOS': {
+        await loadVocab();
         const all = await chrome.storage.local.get(null);
         const videos = Object.keys(all)
           .filter((k) => k.startsWith('video_'))
-          .map((k) => all[k]);
+          .map((k) => decorateRecord(all[k]));
         videos.sort((a, b) => b.capturedAt - a.capturedAt);
         sendResponse({ ok: true, videos: videos });
         break;
@@ -831,7 +1366,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       default:
         sendResponse({ ok: false, error: 'unknown type' });
     }
-  })();
+  };
+  let key = null;
+  if (['CAPTIONS', 'CAPTIONS_DELTA', 'DELETE_VIDEO'].includes(msg.type)) key = 'video_' + msg.videoId;
+  if (['SLASH_WORD', 'UNSLASH_WORD', 'CLEAR_FAMILIAR'].includes(msg.type)) key = 'familiarWords';
+  if (['IMPORT_DICT', 'DELETE_DICT'].includes(msg.type)) key = 'vocabulary';
+  if (msg.type === 'SAVE_PROGRESS') key = PROGRESS_KEY;
+  (key ? withStorageLock(key, run) : run()).catch((error) => {
+    console.error('[YT-CET4] 消息处理失败', error);
+    sendResponse({ ok: false, error: String(error.message || error) });
+  });
 
   return true;
 });
+
+if (chrome.tabs && chrome.tabs.onRemoved) {
+  chrome.tabs.onRemoved.addListener((tabId) => captureOwners.delete(tabId));
+}

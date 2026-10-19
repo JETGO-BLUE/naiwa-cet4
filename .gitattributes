@@ -1,0 +1,8 @@
+# 统一 LF。
+# 原因：vocabulary-sources.json 里记录了数据文件的 SHA-256，
+# 如果 Windows 检出时把换行改成 CRLF，哈希就会变，CI 的对账会失败。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
