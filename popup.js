@@ -25,6 +25,7 @@ let swipeEndAt = 0; // 刚划完的时间戳，用来吃掉紧随其后的那次
 let basicHiddenCount = 0; // 本次被隐藏的基础词数量（只用于提示）
 let captureStatus = null; // content script 上报的采集状态
 let dictState = { selected: 'cet4', dicts: [] }; // 当前词库 + 可选词库列表
+let learningMode = 'quiz'; // 'quiz' 测试模式（四选一）| 'normal' 普通模式（直接看释义）
 let lastLoadedVideoId = null; // 上次按「做题进度」加载的是哪个视频
 let progressSaveTimer = null; // 防抖：翻页时别每按一次键就写一次盘
 
@@ -201,6 +202,12 @@ let contentDebug = null; // content 返回的诊断信息
 async function init() {
   // 0) 词库列表（必须先拿到，否则渲染时不知道该按哪个词库筛选）
   await loadDicts();
+
+  // 0.3) 学习方式（普通/测试），存本地，下次打开沿用
+  const lm = await send({ type: 'GET_LEARNING_MODE' });
+  learningMode = lm && lm.mode === 'normal' ? 'normal' : 'quiz';
+  const modeSel = document.getElementById('learningModeSelect');
+  if (modeSel) modeSel.value = learningMode;
 
   // 0.5) 采集状态（content script 上报的，抓不到词时靠它看卡在哪一步）
   const cap = await send({ type: 'GET_CAPTURE_STATUS' });
@@ -489,8 +496,8 @@ async function renderCurrent(opts) {
     resume = await restoreProgress(vid);
   }
 
-  // 先把题目准备好（本地题库，一次批量取回）
-  await ensureQuizzes(shown);
+  // 先把题目准备好（本地题库，一次批量取回）—— 只在测试模式才需要出题
+  if (learningMode === 'quiz') await ensureQuizzes(shown);
 
   const idx = resume ? resolveResumeIndex(shown, resume) : resolveDeckIndex(shown, opts);
   const byWord = new Map(shown.map((w) => [w.word, w]));
@@ -555,7 +562,7 @@ function deckHtml(shown) {
   return `
     <div class="deck">
       <div class="deck-top">
-        <div class="deck-count">第 <b class="deck-now">1</b> / <span class="deck-total">${shown.length}</span> 题<button type="button" class="dict-chip" id="dictChip" title="切换词库">四级 <i>▾</i></button></div>
+        <div class="deck-count">第 <b class="deck-now">1</b> / <span class="deck-total">${shown.length}</span> ${learningMode === 'quiz' ? '题' : '词'}<button type="button" class="dict-chip" id="dictChip" title="切换词库">四级 <i>▾</i></button></div>
         <div class="deck-stat"></div>
       </div>
       <div class="deck-bar"><i></i></div>
@@ -655,7 +662,7 @@ function updateDeckMeta() {
     statEl.innerHTML =
       '✅ <b>' + right + '</b> · ❌ <b>' + wrong + '</b> · 斩 <b>' + familiarWords.length + '</b>' + basicNote;
   }
-  if (doneEl) doneEl.hidden = !(deckWords.length > 0 && right === deckWords.length);
+  if (doneEl) doneEl.hidden = learningMode !== 'quiz' || !(deckWords.length > 0 && right === deckWords.length);
 }
 
 // 答对后自动翻页：等一下让用户看清正确项，再滑到下一张
@@ -749,7 +756,11 @@ function renderQuizBlock(card, w) {
   if (!host) return;
   const idx = parseInt(card.getAttribute('data-index'), 10);
   const hasNext = Number.isFinite(idx) ? idx < deckWords.length - 1 : true;
-  host.innerHTML = quizHtml(quizCache.get(w.word), getQuizState(w.word), w.word, hasNext);
+  // 普通模式：不出题，直接把释义摊在卡片上
+  host.innerHTML =
+    learningMode === 'normal'
+      ? '<div class="normal-meaning">' + escapeHtml(w.meaning || '暂无释义（点「详解」联网查）') + '</div>'
+      : quizHtml(quizCache.get(w.word), getQuizState(w.word), w.word, hasNext);
   const st = quizState.get(w.word);
   card.classList.toggle('solved', !!(st && st.solved));
 }
@@ -1464,6 +1475,13 @@ async function importDictFile(file) {
 
 document.getElementById('dictImportBtn').addEventListener('click', () => {
   document.getElementById('dictFile').click();
+});
+
+// 学习方式切换：普通/测试。切完重渲染，进度照旧（两种模式共享同一份记录）
+document.getElementById('learningModeSelect').addEventListener('change', async (event) => {
+  learningMode = event.target.value === 'normal' ? 'normal' : 'quiz';
+  await send({ type: 'SET_LEARNING_MODE', mode: learningMode });
+  render({ stayIndex: deckIndex });
 });
 
 document.getElementById('dictFile').addEventListener('change', async (e) => {

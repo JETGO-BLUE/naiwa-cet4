@@ -4,6 +4,32 @@
 
 ---
 
+## [1.7.0] — 2026-10-20
+
+从 wwj 的 PR#4 里**挑着摘**的三样（他的分支混进了那套视频身份确认队列，没要）：
+
+### 新增
+- 🎚️ **普通 / 测试双模式**：词库弹层顶部多了「学习方式」选择器
+  - **测试模式**（默认）：四选一记词，跟原来一样
+  - **普通模式**：不出题，卡片上直接把释义摊开，适合快速过一遍词
+  - 选择存本地，下次打开沿用；两种模式共用同一份记录和做题进度
+  - 普通模式下计数单位从「题」变「词」，「全部答完」提示只在测试模式出现
+- 📺 **标准字幕轨通道**（第三条采集通道）：页面 `<video>` 自带标准字幕轨（`<track>`）时，
+  用 `cuechange` 直接读，`startTime` 是精确起点，照样进 3 分钟分桶
+  - 自动过滤非英文轨（语言代码 + 字母占比双重判断）
+  - 与沉浸式翻译、YouTube 原生轨并存，共用同一份累积表和增量发送
+  - 注意边界：只对「原生 `<video>` + `<track>`」的站点有效；Netflix / B 站这种自绘字幕 DOM 的无效
+- 📦 **打包清单脚本** `scripts/package-extension.js`：21 个运行文件清单 + 校验 manifest 引用，
+  `node scripts/package-extension.js --check` 本地就能跑，发布时防漏文件
+
+### 说明
+- **没有照搬** PR#4 里的视频身份管理（`recordId` / `identityConfirmed` / 确认队列 / `RETRY_SAVE`）：
+  我们的按「3 分钟区 + 时间」幂等合并已经覆盖了它要解决的问题，那套只会加复杂度
+- PR#4 是从 v1.5.0 分叉的，混着我们 1.6.x 的改动；实测整包合并 7 文件 / 42 处冲突，
+  所以按功能摘而不是合并分支
+
+---
+
 ## [1.6.1] — 2026-10-19
 
 ### 修复
@@ -172,6 +198,7 @@
 
 ---
 
+[1.7.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.7.0
 [1.6.1]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.6.1
 [1.6.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.6.0
 [1.5.0]: https://github.com/JETGO-BLUE/naiwa-cet4/releases/tag/v1.5.0

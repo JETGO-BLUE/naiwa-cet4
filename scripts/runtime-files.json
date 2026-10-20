@@ -1,0 +1,23 @@
+[
+  "manifest.json",
+  "background.js",
+  "content.js",
+  "youtube-bridge.js",
+  "popup.html",
+  "popup.js",
+  "cet4_words.json",
+  "cet6_words.json",
+  "ielts_words.json",
+  "vocab_extra_meanings.json",
+  "quiz_bank.json",
+  "vocabulary-sources.json",
+  "docs/vocabulary-sources.html",
+  "LICENSE",
+  "licenses/CC-BY-SA-4.0.txt",
+  "licenses/cet6-LICENSE.txt",
+  "licenses/ielts-LICENSE.txt",
+  "licenses/ecdict-LICENSE.txt",
+  "icons/icon16.png",
+  "icons/icon48.png",
+  "icons/icon128.png"
+]

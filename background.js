@@ -1168,6 +1168,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
 
+      // ---- 学习方式：普通（直接看释义）/ 测试（四选一） ----
+      case 'GET_LEARNING_MODE': {
+        const d = await chrome.storage.local.get('learningMode');
+        sendResponse({ ok: true, mode: d.learningMode === 'normal' ? 'normal' : 'quiz' });
+        break;
+      }
+
+      case 'SET_LEARNING_MODE': {
+        const mode = msg.mode === 'normal' ? 'normal' : 'quiz';
+        await chrome.storage.local.set({ learningMode: mode });
+        sendResponse({ ok: true, mode: mode });
+        break;
+      }
+
       case 'GET_STATUS': {
         const d = await chrome.storage.local.get('lastStatus');
         sendResponse({ ok: true, status: d.lastStatus || null });

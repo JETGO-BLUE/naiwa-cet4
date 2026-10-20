@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "奶娃过四级",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "奶娃陪你过四级：收集视频字幕中的词汇（四级/六级/雅思/自定义词表，优先读取沉浸式翻译的双语字幕），每个 3 分钟区间记录一个精确出现时间点（可点击跳回），卡片式四选一记词",
   "minimum_chrome_version": "111",
   "permissions": [

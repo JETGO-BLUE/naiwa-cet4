@@ -123,6 +123,18 @@
     return text.trim();
   }
 
+  // 把一句字幕记进累积表（沉浸式翻译、标准字幕轨、YouTube 原生轨共用这一处）
+  function addCue(text, start, source) {
+    const clean = String(text || '').trim();
+    if (!clean) return false;
+    if (!seenSentences.has(clean)) {
+      seenSentences.set(clean, Number(start) || 0);
+      reportStatus('collecting', source || '字幕');
+    }
+    flushCaptions();
+    return true;
+  }
+
   function onCaptionChanged() {
     const root = getCaptionRoot();
     if (!root) return;
@@ -133,11 +145,75 @@
     const video = getVideo();
     const t = video && video.currentTime != null ? video.currentTime : 0;
 
-    if (!seenSentences.has(text)) {
-      seenSentences.set(text, t);
-      reportStatus('collecting', '沉浸式翻译的双语字幕');
+    addCue(text, t, '沉浸式翻译的双语字幕');
+  }
+
+  // ============ 标准字幕轨（<video>.textTracks） ============
+  // 第三条采集通道：页面 <video> 自带标准字幕轨时，用 cuechange 直接读，
+  // 不依赖沉浸式翻译。只对「原生 <video> + <track>」的站点有效（Netflix/B站 自绘 DOM 的无效）。
+  let textTrackList = null;
+  let textTrackListeners = new Map();
+
+  function isEnglishTrack(track) {
+    const lang = String(track.language || track.label || '').toLowerCase();
+    return /^en(?:[-_]|$)/.test(lang);
+  }
+
+  function textLooksEnglish(text) {
+    const letters = String(text || '').match(/[a-z]/gi) || [];
+    const all = String(text || '').match(/[\p{L}]/gu) || [];
+    return letters.length >= 2 && letters.length / Math.max(1, all.length) >= 0.7;
+  }
+
+  function consumeTextTrack(track) {
+    if (!track || track.mode === 'disabled') return;
+    const cues = track.activeCues;
+    if (!cues || !cues.length) return;
+    for (const cue of Array.from(cues)) {
+      const text = String(cue.text || '').replace(/<[^>]*>/g, ' ').trim();
+      if ((!isEnglishTrack(track) && !textLooksEnglish(text)) || !text) continue;
+      // startTime 是标准字幕轨的精确起点，直接进 3 分钟分桶
+      addCue(text, Number(cue.startTime) || 0, '标准字幕轨（' + (track.language || 'en') + '）');
     }
-    flushCaptions();
+  }
+
+  function refreshTextTrackListeners() {
+    const video = getVideo();
+    const list = video && video.textTracks;
+    if (list !== textTrackList) {
+      // 视频换了 / 轨道列表重建：清掉旧监听
+      for (const [track, listener] of textTrackListeners) {
+        try { track.removeEventListener('cuechange', listener); } catch (e) {}
+      }
+      textTrackList = list || null;
+      textTrackListeners = new Map();
+    }
+    if (!list) return;
+    const current = new Set(Array.from(list));
+    for (const [track, listener] of textTrackListeners) {
+      if (!current.has(track)) {
+        try { track.removeEventListener('cuechange', listener); } catch (e) {}
+        textTrackListeners.delete(track);
+      }
+    }
+    for (const track of current) {
+      if (textTrackListeners.has(track)) continue;
+      const listener = () => consumeTextTrack(track);
+      track.addEventListener('cuechange', listener);
+      textTrackListeners.set(track, listener);
+      consumeTextTrack(track); // 已激活的 cue 立即读一次
+    }
+  }
+
+  function startTextTrackListening() {
+    const video = getVideo();
+    if (!video) return;
+    // 轨道可能是视频就绪后才有的，监听 addtrack；也定时兜底刷新
+    if (video.textTracks && video.textTracks.addEventListener) {
+      video.textTracks.addEventListener('addtrack', refreshTextTrackListeners);
+      video.textTracks.addEventListener('removetrack', refreshTextTrackListeners);
+    }
+    refreshTextTrackListeners();
   }
 
   function flushCaptions() {
@@ -395,6 +471,7 @@
   function boot() {
     watchNavigation();
     startCaptionObserver();
+    startTextTrackListening();
     // 初始兜底
     setTimeout(() => {
       if (seenSentences.size === 0) fallbackNativeCaptions();
