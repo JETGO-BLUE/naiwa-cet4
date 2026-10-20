@@ -46,16 +46,8 @@ jobs:
           set -e
           VERSION=$(node -p "require('./manifest.json').version")
           NAME="naiwa-cet4-v${VERSION}"
-          mkdir -p "dist/${NAME}"
-          # 只把扩展运行必需的文件打进 zip
-          cp manifest.json background.js content.js popup.html popup.js cet4_words.json quiz_bank.json "dist/${NAME}/"
-          cp -r icons "dist/${NAME}/icons"
-          # 必需文件一个都不能少（漏了会导致装上去功能残缺）
-          for f in manifest.json background.js content.js popup.html popup.js cet4_words.json quiz_bank.json; do
-            test -f "dist/${NAME}/${f}" || { echo "❌ 缺少必需文件: ${f}"; exit 1; }
-          done
-          test -f "dist/${NAME}/icons/icon128.png" || { echo "❌ 缺少图标"; exit 1; }
-          echo "✅ 必需文件齐全"
+          # 用打包清单脚本统一校验 + 复制，和本地 --check 用同一份清单，绝不漏文件
+          node scripts/package-extension.js "dist/${NAME}"
           cd dist
           zip -r "${NAME}.zip" "${NAME}" -x ".*" -x "*/.*"
           rm -rf "${NAME}"
@@ -74,13 +66,13 @@ jobs:
           body: |
             ## 本次更新
 
-            - 🎧 **四选一记词**：单词表不再直接给中文释义 —— 单击单词听发音，再从 4 个中文释义里选。
-              选错在该选项旁标 **❌**，选对变绿并直接亮出它的中文释义
-            - 🗂️ **本地题库**：4590 个词各配 3 个「形近 / 同词性 / 易混淆」干扰释义
-              （`access` 配 `accent` / `actress` / `accuse`），**出题不联网**
-            - 🔊 **点读发音**：用浏览器内置语音合成朗读英文，离线可用、无需额外权限
-            - 🧭 **时间点改为每 3 分钟记一次**：显示为 `0:00 / 3:00 / 6:00…`，上限 10 个
-            - 🗡️ **「斩」掉即从列表移除**：不再只是变灰，但仍可在「已斩词」页撤销
+            - 🎚️ **普通 / 测试双模式**：词库弹层顶部切「学习方式」，测试模式四选一记词，普通模式直接看释义
+            - 🗂️ **三词库 + 自定义**：四级 4,590 / 六级 2,219 / 雅思 1,000，还能导入自己的词表（JSON / CSV / TSV / TXT）
+            - 💾 **做题进度持久化**：退出、刷新、重进视频，停在原题，前后「已做 / 未做」状态都在
+            - 🐞 **修「刷新后单词清零」**：此前刷新页面会把已抓的词覆盖掉，现已根治
+            - 🚦 **采集状态条 + 诊断面板**：抓不到词时直接看到卡在哪一步
+            - 📺 **标准字幕轨通道**：页面自带字幕轨也能抓（不依赖沉浸式翻译）
+            - 🎲 **选项顺序固定**：同一个词每次打开选项位置都一样，不再乱跳
 
             ## 安装
 
@@ -90,7 +82,7 @@ jobs:
             4. 打开视频页并让字幕持续播放
 
             > **⚠️ 一定要打开「沉浸式翻译」的双语字幕。**
-            > 本扩展抓的词，就是从这套双语字幕里取的（只取英文原文那一行）。
-            > 不开的话，除 YouTube 自带字幕外，Netflix / B站 这类平台基本抓不到词。
+            > 本扩展优先从这套双语字幕取词（只取英文原文那一行）；不开的话，
+            > 靠 YouTube 原生字幕或页面标准字幕轨兜底，Netflix / B 站这类自绘字幕的平台基本抓不到词。
 
-            > 本扩展**不上架任何商店**，只能按上面的方式手动加载。
+            > 本扩展**不上架任何商店**，只能按上面的方式手动加载。详见仓库 `README.md` 与 `docs/vocabulary-sources.html`。
